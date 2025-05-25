@@ -5,7 +5,7 @@ This way you only need to provide the DocFX metadata and content using a command
 
 An example can be found in the [shared-kernel](https://github.com/codebeltnet/shared-kernel/blob/main/.docfx/Dockerfile.docfx) repository.
 
-> [!CAUTION]
-> A bug in [DocFX](https://github.com/dotnet/docfx) build process was introduced starting with version 2.78.0 (for ARM64 architecture). My advice is to use prior versions.
+> [!NOTE]
+> Something happened with [DocFX](https://github.com/dotnet/docfx) from version 2.78.0 (for ARM64 architecture). Not sure what, but it seems to be solved using `--platform=$BUILDPLATFORM` in the consuming Dockerfile.
 > 
 > For more information check out this discussion: [What changes was applied to 2.78.x?](https://github.com/dotnet/docfx/discussions/10512)

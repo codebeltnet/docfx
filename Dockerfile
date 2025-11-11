@@ -1,7 +1,7 @@
-﻿FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine
+﻿FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0-alpine
 
-ARG DOCFX_VERSION=2.78.3
-ARG DOTNET_VERSION=9.0
+ARG DOCFX_VERSION=2.78.4
+ARG DOTNET_VERSION=10.0
 
 ENV DOTNET_ROOT=/root/.dotnet
 ENV PATH=$PATH:$DOTNET_ROOT:$DOTNET_ROOT/tools

@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(ValueFromPipeline)]
-    [string]$DocfxVersion="2.78.4",
+    [string]$DocfxVersion="2.78.5",
     [Parameter(ValueFromPipeline)]
     [string]$DotnetVersion="10.0",
     [Parameter(ValueFromPipeline)]

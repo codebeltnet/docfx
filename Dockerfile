@@ -1,6 +1,6 @@
 ﻿FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0-alpine
 
-ARG DOCFX_VERSION=2.78.4
+ARG DOCFX_VERSION=2.78.5
 ARG DOTNET_VERSION=10.0
 
 ENV DOTNET_ROOT=/root/.dotnet

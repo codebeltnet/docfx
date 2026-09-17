@@ -709,9 +709,14 @@ body.ms-style footer .container-xxl {
 
 @media (min-width: 768px) {
   body.ms-style > main.ms-has-toc > .toc-offcanvas {
-    position: sticky;
+    position: fixed;
+    z-index: 1020;
     top: calc(var(--ms-header-height) + 1rem);
-    height: calc(100vh - var(--ms-header-height) - 2rem);
+    right: auto;
+    bottom: 5rem;
+    left: max(clamp(1rem, 2vw, 2rem), calc(50vw - 960px + clamp(1rem, 2vw, 2rem)));
+    width: 16.25rem;
+    height: auto;
     overflow: visible;
   }
 
@@ -733,6 +738,20 @@ body.ms-style footer .container-xxl {
 
   body.ms-style > main > .toc-offcanvas .offcanvas-header {
     display: none;
+  }
+}
+
+@media (min-width: 992px) and (max-width: 1199.98px) {
+  body.ms-style > main.ms-has-toc > .toc-offcanvas {
+    left: 1rem;
+    width: 13rem;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 991.98px) {
+  body.ms-style > main.ms-has-toc > .toc-offcanvas {
+    left: 1rem;
+    width: 15rem;
   }
 }
 

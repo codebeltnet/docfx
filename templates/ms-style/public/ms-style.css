@@ -1,0 +1,759 @@
+/*
+ * Microsoft Learn-inspired API reading surface for DocFX.
+ * Keep the overlay independent of repository-specific navigation and content.
+ */
+
+html[data-bs-theme="light"] {
+  color-scheme: light;
+}
+
+html[data-bs-theme="dark"] {
+  color-scheme: dark;
+}
+
+body.ms-style {
+  --ms-canvas: #ffffff;
+  --ms-sidebar: #f7f7f7;
+  --ms-panel: #f3f3f3;
+  --ms-border: #d1d1d1;
+  --ms-text: #1b1b1b;
+  --ms-muted: #5d5d5d;
+  --ms-link: #005fb8;
+  --ms-link-hover: #004578;
+  --ms-accent: #0067b8;
+  --ms-code-background: #f7f7f7;
+  --ms-table-header: #f3f3f3;
+  --ms-callout: #eff6fc;
+  --ms-nav-selected: #e8e8e8;
+  --ms-header-height: 60px;
+
+  color: var(--ms-text);
+  background: var(--ms-canvas);
+  font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+html[data-bs-theme="dark"] body.ms-style,
+body.ms-style[data-bs-theme="dark"] {
+  --ms-canvas: #1b1b1b;
+  --ms-sidebar: #171717;
+  --ms-panel: #252525;
+  --ms-border: #414141;
+  --ms-text: #f3f3f3;
+  --ms-muted: #c8c8c8;
+  --ms-link: #75b6f2;
+  --ms-link-hover: #9acbfa;
+  --ms-accent: #75b6f2;
+  --ms-code-background: #202020;
+  --ms-table-header: #2a2a2a;
+  --ms-callout: #18365f;
+  --ms-nav-selected: #303030;
+}
+
+body.ms-style > header {
+  position: sticky;
+  z-index: 1030;
+  top: 0;
+  min-height: var(--ms-header-height);
+  border-color: var(--ms-border) !important;
+  background: var(--ms-canvas) !important;
+}
+
+body.ms-style > header .navbar {
+  min-height: var(--ms-header-height);
+  padding: 0;
+}
+
+body.ms-style > header .navbar > .container-xxl {
+  width: 100%;
+  max-width: none;
+  padding-right: clamp(1rem, 2vw, 2rem);
+  padding-left: clamp(1rem, 2vw, 2rem);
+}
+
+body.ms-style .navbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-right: 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+body.ms-style .navbar-brand #logo {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+body.ms-style #navbar {
+  min-width: 0;
+}
+
+body.ms-style #navbar a,
+body.ms-style > header a {
+  color: var(--ms-text);
+  text-decoration: none;
+}
+
+body.ms-style #navbar a:hover,
+body.ms-style > header a:hover {
+  color: var(--ms-link);
+}
+
+body.ms-style .navbar .form-control {
+  min-height: 2.5rem;
+  border-color: var(--ms-border);
+  border-radius: 0.2rem;
+  background: var(--ms-canvas);
+  color: var(--ms-text);
+}
+
+body.ms-style > main.container-xxl {
+  display: grid;
+  grid-template-columns: minmax(15rem, 16.25rem) minmax(0, 1fr) minmax(12.5rem, 15rem);
+  gap: clamp(1rem, 2vw, 2rem);
+  align-items: start;
+  width: 100%;
+  max-width: 1920px;
+  min-height: calc(100vh - var(--ms-header-height) - 5rem);
+  margin-right: auto;
+  margin-left: auto;
+  padding: 1.5rem clamp(1rem, 2vw, 2rem) 3rem;
+}
+
+body.ms-style > main.ms-no-toc.ms-has-affix {
+  grid-template-columns: minmax(0, 1fr) minmax(12.5rem, 15rem);
+}
+
+body.ms-style > main.ms-no-toc.ms-no-affix {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.ms-style > main.ms-has-toc.ms-no-affix {
+  grid-template-columns: minmax(15rem, 16.25rem) minmax(0, 1fr);
+}
+
+body.ms-style > main.ms-has-toc > .toc-offcanvas {
+  grid-column: 1;
+  width: auto;
+  max-width: none;
+  margin: 0;
+}
+
+body.ms-style > main > .toc-offcanvas .offcanvas-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0.75rem 0.75rem 1rem 0;
+}
+
+body.ms-style > main.ms-has-toc > .content {
+  grid-column: 2;
+}
+
+body.ms-style > main.ms-no-toc > .content {
+  grid-column: 1;
+}
+
+body.ms-style > main > .content {
+  width: 100%;
+  max-width: 800px;
+  min-width: 0;
+  margin: 0 auto !important;
+  padding: 0 0 2rem;
+}
+
+body.ms-style .actionbar {
+  display: flex;
+  min-height: 2.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+body.ms-style .actionbar button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  color: var(--ms-text);
+}
+
+body.ms-style > main.ms-has-toc > .affix {
+  grid-column: 3;
+}
+
+body.ms-style > main.ms-no-toc.ms-has-affix > .affix {
+  grid-column: 2;
+}
+
+body.ms-style > main > .affix {
+  position: sticky;
+  top: calc(var(--ms-header-height) + 1.5rem);
+  width: 100% !important;
+  max-width: none !important;
+  max-height: calc(100vh - var(--ms-header-height) - 3rem);
+  overflow-y: auto;
+  margin: 0 !important;
+  color: var(--ms-muted);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+body.ms-style article {
+  min-width: 0;
+  color: var(--ms-text);
+}
+
+body.ms-style article h1 {
+  margin: 0.25rem 0 1.5rem;
+  color: var(--ms-text);
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+body.ms-style article h2 {
+  margin: 2.25rem 0 1rem;
+  color: var(--ms-text);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+body.ms-style article h2.ms-definition {
+  margin-top: 1.5rem;
+}
+
+body.ms-style article h3 {
+  margin: 1.75rem 0 0.75rem;
+  color: var(--ms-text);
+  font-size: 1.375rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+body.ms-style article h4 {
+  margin: 1.5rem 0 0.5rem;
+  color: var(--ms-text);
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+body.ms-style article p {
+  margin-bottom: 1rem;
+}
+
+body.ms-style article a {
+  color: var(--ms-link);
+  text-decoration: underline;
+  text-decoration-thickness: 0.0625em;
+  text-underline-offset: 0.15em;
+}
+
+body.ms-style article a:hover {
+  color: var(--ms-link-hover);
+}
+
+body.ms-style article :focus-visible,
+body.ms-style > header :focus-visible,
+body.ms-style .toc :focus-visible,
+body.ms-style .affix :focus-visible {
+  outline: 2px solid var(--ms-accent);
+  outline-offset: 2px;
+}
+
+body.ms-style .facts {
+  margin: 0 0 1.25rem;
+  color: var(--ms-muted) !important;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+body.ms-style .facts dl {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+body.ms-style .facts dt {
+  flex: 0 0 4.5rem;
+  font-weight: 600;
+}
+
+body.ms-style .facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+body.ms-style .facts a {
+  color: var(--ms-link);
+}
+
+body.ms-style .summary,
+body.ms-style .conceptual,
+body.ms-style .remarks {
+  color: var(--ms-text);
+}
+
+body.ms-style .codewrapper {
+  position: relative;
+  margin: 1.25rem 0 1.5rem;
+  overflow: hidden;
+  border: 1px solid var(--ms-border);
+  border-radius: 0.2rem;
+  background: var(--ms-code-background);
+}
+
+body.ms-style .codewrapper::before {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--ms-border);
+  background: var(--ms-panel);
+  color: var(--ms-text);
+  content: attr(data-code-language);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+body.ms-style .codewrapper pre {
+  position: static;
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  background: transparent;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+body.ms-style .codewrapper code {
+  font-family: Consolas, "Cascadia Code", "Courier New", monospace;
+}
+
+body.ms-style .codewrapper pre > .code-action {
+  position: absolute;
+  z-index: 1;
+  top: 0.4rem;
+  right: 0.5rem;
+  display: inline-flex !important;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--ms-border) !important;
+  border-radius: 0.2rem;
+  background: var(--ms-canvas);
+  color: var(--ms-text);
+  opacity: 1 !important;
+  visibility: visible !important;
+  text-decoration: none;
+}
+
+body.ms-style .codewrapper pre > .code-action::after {
+  content: " Copy";
+  font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 0.875rem;
+}
+
+body.ms-style article :not(pre) > code {
+  padding: 0.08rem 0.25rem;
+  border-radius: 0.15rem;
+  background: var(--ms-panel);
+  color: var(--ms-text);
+  font-size: 0.9em;
+}
+
+body.ms-style dl.typelist {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 0.75rem;
+  align-items: start;
+}
+
+body.ms-style dl.typelist > dt {
+  grid-column: 1;
+}
+
+body.ms-style dl.typelist > dd {
+  grid-column: 2;
+  min-width: 0;
+  margin: 0;
+}
+
+body.ms-style dl.typelist > dd > div {
+  display: inline;
+}
+
+body.ms-style dl.typelist > dd > div:not(:last-child)::after {
+  content: ", ";
+}
+
+body.ms-style dl.inheritance > dd > div:not(:last-child)::after {
+  content: " → ";
+}
+
+body.ms-style dl.typelist,
+body.ms-style dl.parameters {
+  margin: 1rem 0 1.5rem;
+}
+
+body.ms-style dl.typelist > dt,
+body.ms-style dl.parameters > dt {
+  font-weight: 600;
+}
+
+body.ms-style dl.typelist > dd,
+body.ms-style dl.parameters > dd {
+  margin-left: 1.25rem;
+}
+
+body.ms-style .ms-member-table {
+  display: block;
+  width: 100%;
+  margin: 1rem 0 2.5rem;
+  overflow-x: auto;
+  border: 1px solid var(--ms-border);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  vertical-align: top;
+}
+
+body.ms-style .ms-member-table > :not(caption) > * > * {
+  min-width: 8rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--ms-border);
+  color: var(--ms-text);
+  vertical-align: top;
+}
+
+body.ms-style .ms-member-table thead th {
+  background: var(--ms-table-header);
+  font-weight: 600;
+}
+
+body.ms-style .ms-member-table tbody th {
+  width: 34%;
+  font-weight: 600;
+}
+
+body.ms-style .ms-member-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+body.ms-style .ms-member-table p:last-child {
+  margin-bottom: 0;
+}
+
+body.ms-style article table:not(.ms-member-table) {
+  width: 100%;
+  margin: 1.25rem 0 2rem;
+  border-collapse: collapse;
+}
+
+body.ms-style article table:not(.ms-member-table) th,
+body.ms-style article table:not(.ms-member-table) td {
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--ms-border);
+  vertical-align: top;
+}
+
+body.ms-style article table:not(.ms-member-table) thead th {
+  background: var(--ms-table-header);
+}
+
+body.ms-style article blockquote,
+body.ms-style article .alert {
+  margin: 1.25rem 0 1.75rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--ms-border);
+  border-radius: 0.2rem;
+  background: var(--ms-callout);
+  color: var(--ms-text);
+}
+
+body.ms-style .toc,
+body.ms-style .affix {
+  color: var(--ms-muted);
+}
+
+body.ms-style .toc {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+body.ms-style .toc a,
+body.ms-style .affix a {
+  color: inherit;
+  text-decoration: none;
+}
+
+body.ms-style .toc .filter {
+  position: relative;
+  flex: 0 0 auto;
+  margin: 0 0 0.75rem;
+}
+
+body.ms-style .toc .filter .form-control {
+  min-height: 2.5rem;
+  border-color: var(--ms-border);
+  border-radius: 0.2rem;
+  background: var(--ms-canvas);
+  color: var(--ms-text);
+}
+
+body.ms-style .toc .flex-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+body.ms-style .toc ul {
+  margin: 0;
+  padding-left: 0.75rem;
+  list-style: none;
+}
+
+body.ms-style .toc > .flex-fill > ul {
+  padding-left: 0;
+}
+
+body.ms-style .toc li {
+  position: relative;
+  margin: 0.1rem 0;
+}
+
+body.ms-style .toc li > a {
+  display: inline-block;
+  vertical-align: top;
+  max-width: calc(100% - 1.5rem);
+  padding: 0.28rem 0.45rem;
+  border-radius: 0.15rem;
+  overflow-wrap: anywhere;
+}
+
+body.ms-style .toc li.active > a,
+body.ms-style .toc li > a[aria-current="page"] {
+  background: var(--ms-nav-selected);
+  color: var(--ms-link);
+  font-weight: 600;
+}
+
+body.ms-style .toc .expand-stub {
+  display: inline-flex;
+  vertical-align: top;
+  width: 1.25rem;
+  min-height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+}
+
+body.ms-style .affix h5 {
+  margin: 0 0 0.5rem;
+  padding: 0 0 0.65rem;
+  border-bottom: 1px solid var(--ms-border) !important;
+  color: var(--ms-text);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+body.ms-style .affix ul {
+  margin: 0;
+  padding: 0;
+  border-left: 1px solid var(--ms-border);
+  list-style: none;
+}
+
+body.ms-style .affix li a {
+  display: block;
+  padding: 0.35rem 0.75rem;
+  border-left: 2px solid transparent;
+  margin-left: -1px;
+  overflow-wrap: anywhere;
+}
+
+body.ms-style .affix li a.active,
+body.ms-style .affix li a[aria-current="location"] {
+  border-left-color: var(--ms-accent);
+  color: var(--ms-link);
+  font-weight: 600;
+}
+
+body.ms-style footer {
+  border-color: var(--ms-border) !important;
+  background: var(--ms-sidebar);
+}
+
+body.ms-style footer .container-xxl {
+  max-width: none;
+  padding: 1rem clamp(1rem, 2vw, 2rem);
+}
+
+@media (max-width: 1199.98px) {
+  body.ms-style > main.ms-has-toc:not(.ms-no-affix) {
+    grid-template-columns: 13rem minmax(0, 1fr) 10rem;
+    gap: 1rem;
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  body.ms-style > main.ms-has-toc.ms-no-affix {
+    grid-template-columns: 13rem minmax(0, 1fr);
+    gap: 1.25rem;
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  body.ms-style > main.ms-no-toc.ms-has-affix {
+    grid-template-columns: minmax(0, 1fr) 10rem;
+    gap: 1rem;
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  body.ms-style > main.ms-has-toc.ms-has-affix > .affix,
+  body.ms-style > main.ms-no-toc.ms-has-affix > .affix {
+    display: block !important;
+  }
+}
+
+@media (max-width: 991.98px) {
+  body.ms-style > main.ms-has-toc:not(.ms-no-affix),
+  body.ms-style > main.ms-has-toc.ms-no-affix {
+    grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+    gap: 1.25rem;
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  body.ms-style > main.ms-has-toc.ms-has-affix > .affix,
+  body.ms-style > main.ms-no-toc.ms-has-affix > .affix {
+    display: none !important;
+  }
+
+  body.ms-style > main.ms-no-toc.ms-has-affix,
+  body.ms-style > main.ms-no-toc.ms-no-affix {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.ms-style > main.ms-no-toc > .content {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 767.98px) {
+  body.ms-style > main.container-xxl {
+    display: block;
+    min-height: calc(100vh - var(--ms-header-height));
+    padding: 0.75rem 0 2rem;
+  }
+
+  body.ms-style > main.ms-has-toc:not(.ms-no-affix),
+  body.ms-style > main.ms-has-toc.ms-no-affix,
+  body.ms-style > main.ms-no-toc.ms-has-affix,
+  body.ms-style > main.ms-no-toc.ms-no-affix {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  body.ms-style > main > .toc-offcanvas {
+    position: static;
+    height: auto;
+    width: auto;
+    max-width: none;
+    overflow: visible;
+    margin: 0;
+  }
+
+  body.ms-style > main > .toc-offcanvas .offcanvas-md {
+    border-right: 0;
+    background: var(--ms-sidebar);
+  }
+
+  body.ms-style > main > .toc-offcanvas .offcanvas-header {
+    display: flex;
+  }
+
+  body.ms-style > main > .content {
+    width: auto;
+    max-width: none;
+    margin: 0 1rem !important;
+  }
+
+  body.ms-style .actionbar {
+    min-height: 2.75rem;
+  }
+
+  body.ms-style article h1 {
+    margin-top: 0.5rem;
+    font-size: 1.75rem;
+  }
+
+  body.ms-style article h2 {
+    font-size: 1.5rem;
+  }
+
+  body.ms-style article h3 {
+    font-size: 1.25rem;
+  }
+
+  body.ms-style .facts dt {
+    flex-basis: 4.5rem;
+  }
+}
+
+@media (min-width: 768px) {
+  body.ms-style > main.ms-has-toc > .toc-offcanvas {
+    position: sticky;
+    top: calc(var(--ms-header-height) + 1rem);
+    height: calc(100vh - var(--ms-header-height) - 2rem);
+    overflow: visible;
+  }
+
+  body.ms-style > main > .toc-offcanvas .offcanvas-md {
+    position: relative;
+    top: auto;
+    height: 100% !important;
+    min-height: 0;
+    overflow: hidden;
+    border-right: 1px solid var(--ms-border);
+    background: var(--ms-sidebar);
+  }
+
+  body.ms-style > main > .toc-offcanvas .offcanvas-body {
+    height: 100% !important;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  body.ms-style > main > .toc-offcanvas .offcanvas-header {
+    display: none;
+  }
+}
+
+@media print {
+  body.ms-style > header {
+    position: static;
+  }
+
+  body.ms-style > main.container-xxl {
+    display: block;
+    max-width: none;
+    padding: 0;
+  }
+
+  body.ms-style > main > .toc-offcanvas,
+  body.ms-style > main > .affix {
+    display: none;
+  }
+
+  body.ms-style > main > .content {
+    width: auto;
+    max-width: none;
+  }
+}

@@ -1,4 +1,4 @@
-﻿ARG DOCFX_VERSION=2.78.5
+﻿ARG DOCFX_VERSION=2.80.1
 ARG DOTNET_VERSION=10.0
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION}-alpine AS template-build

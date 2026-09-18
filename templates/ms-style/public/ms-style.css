@@ -120,7 +120,7 @@ body.ms-style > main.container-xxl {
   min-height: calc(100vh - var(--ms-header-height) - 5rem);
   margin-right: auto;
   margin-left: auto;
-  padding: 1.5rem clamp(1rem, 2vw, 2rem) 3rem 0.5rem;
+  padding: 1.5rem clamp(1rem, 2vw, 2rem) 0 0.5rem;
 }
 
 body.ms-style > main.ms-no-toc.ms-has-affix {
@@ -162,7 +162,7 @@ body.ms-style > main > .content {
   max-width: 800px;
   min-width: 0;
   margin: 0 auto !important;
-  padding: 0 0 2rem;
+  padding: 0 0 3rem; /* bottom space moved here from main */
 }
 
 body.ms-style > main.ms-has-toc > .content {
@@ -780,20 +780,15 @@ body.ms-style footer .container-xxl {
 
   body.ms-style > main > .toc-offcanvas {
     position: static;
-    align-self: auto;
+    margin-top: 0;
     height: auto;
     width: auto;
     max-width: none;
     overflow: visible;
-    border-right: 0;
-    background: transparent;
     margin: 0;
   }
 
   body.ms-style > main > .toc-offcanvas .offcanvas-md {
-    position: static;
-    height: auto;
-    top: auto;
     border-right: 0;
     background: var(--ms-sidebar);
   }
@@ -841,26 +836,22 @@ body.ms-style footer .container-xxl {
 
 @media (min-width: 768px) {
   body.ms-style > main.ms-has-toc > .toc-offcanvas {
-    /* Stretches to fill the full content-column height so border-right and
-       background connect flush to the footer, never floating above it. */
-    align-self: stretch;
-    position: relative;     /* containing block for inner sticky + resizer */
+    position: sticky;
+    top: var(--ms-header-height);          /* flush with header bottom */
+    margin-top: -1.5rem;                   /* cancel main's padding-top so sidebar starts at header edge */
+    height: calc(100vh - var(--ms-header-height)); /* fills to viewport bottom; footer z-index covers the join */
     min-width: 12rem;
-    overflow: visible;      /* inner sticky and resizer need this */
-    border-right: 1px solid var(--ms-border);
-    background: var(--ms-sidebar);
+    overflow: visible;
     z-index: 10;
   }
 
   body.ms-style > main > .toc-offcanvas .offcanvas-md {
-    /* Sticky inner panel — stays in view while the column extends below. */
-    position: sticky;
-    top: calc(var(--ms-header-height) + 0.5rem);
+    position: relative;
     height: 100%;
-    max-height: calc(100vh - var(--ms-header-height) - 1rem);
     min-height: 0;
     overflow: hidden;
-    background: transparent; /* toc-offcanvas supplies the background */
+    border-right: 1px solid var(--ms-border);
+    background: var(--ms-sidebar);
   }
 
   body.ms-style > main > .toc-offcanvas .offcanvas-body {

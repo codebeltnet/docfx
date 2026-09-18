@@ -58,7 +58,7 @@ This preserves existing generated YAML, Markdown, TOCs, overwrite files, filters
 `ms-style` changes the API reading surface with:
 
 - type-first headings such as `DateTime Struct` and a Definition/facts block;
-- Learn-like member tables and a narrow article column with navigation rails; and
+- Learn-like type/member tables, namespace category tables, and a narrow article column with a wide-screen navigation rail that collapses into an inline article outline on narrower desktops; and
 - responsive light/dark styling.
 
 It does not reproduce Microsoft's dynamic global navigation, account controls, product switcher, or other Learn platform services. Those are outside a DocFX template's responsibility.

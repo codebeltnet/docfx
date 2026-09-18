@@ -6,8 +6,8 @@ It keeps DocFX's managed-reference preprocessing, search, navigation, themes, co
 
 - type-first headings such as `DateTime Struct`;
 - a `Definition` section with Namespace, Assemblies, and Source facts;
-- a narrow, readable API article column with persistent navigation rails;
-- Learn-like member summary tables with Name and Description columns;
+- a narrow, readable API article column with a persistent right rail on wide screens and an inline article outline on narrower desktops;
+- Learn-like type/member summary tables and namespace category tables with Name and Description columns;
 - same-origin JSON navigation loaded from the deployed site instead of legacy browser cache entries; and
 - responsive light and dark presentation using the existing modern assets.
 

@@ -4,19 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2026-09-17
+## [1.0.0] - 2026-09-18
 
-This major release introduces the ms-style DocFX template, which uses type-first headings and a Microsoft Learn-style layout for API reference documentation. It also adds a multi-stage Docker build and guidance for adopting the template in consuming repositories.
+This major release introduces the ms-style DocFX template, a Microsoft Learn-styled API reference template with type-first headings and responsive navigation. It includes a multi-stage Docker build optimization, an upgrade to DocFX 2.80.1, floating version tags for flexible Docker image pulling, and comprehensive adoption documentation for consuming repositories.
 
 ### Added
 
-- Added the ms-style DocFX template, with a master layout, class header and member page partials, responsive light and dark styling, type-first headings, definition blocks, and a Microsoft Learn-aligned member layout,
-- Added a multi-stage Docker build with `template-build`, `dotnet-sdk`, and `final` stages. The build includes the ms-style template layer to optimize image size,
-- Added adoption documentation for the ms-style template, including configuration examples, visual comparisons with Microsoft Learn, and a proof of concept for consuming repositories.
+- ms-style DocFX template with type-first headings, definition blocks, Learn-like member tables, namespace category tables, responsive navigation rail, and responsive light/dark styling for desktop and mobile screens,
+- Multi-stage Docker build with `template-build`, `dotnet-sdk`, and `final` stages to optimize image footprint by retaining only required SDK components in the runtime base,
+- Floating version tag support in the build script allowing users to pull images by major version (e.g., `2`), major.minor version (e.g., `2.80`), exact version, or `latest` without tracking individual patch releases,
+- Comprehensive adoption documentation for consuming repositories, including template configuration examples, visual alignment with Microsoft Learn, and a curated list of projects already integrated.
 
 ### Changed
 
-- Refactored the Dockerfile into multiple stages so the runtime image retains only the SDK components it needs, reducing the image footprint.
+- Refactored the Dockerfile from a single-stage to a multi-stage pipeline that separates template preparation and SDK tooling installation from the final runtime base, significantly reducing the image footprint,
+- Upgraded DocFX version from 2.78.5 to 2.80.1,
+- Enhanced repository documentation with detailed ms-style template features, integration guidance for the responsive layout, and improved metadata examples for using `memberLayout: separatePages`.
 
 ## [0.1.4] - 2026-02-27
 

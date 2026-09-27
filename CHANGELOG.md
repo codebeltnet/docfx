@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-09-27
+
+This is a patch release that upgrades DocFX to 2.81.0.
+
+### Changed
+
+- Upgraded DocFX version from 2.80.1 to 2.81.0 in the build script and Docker configuration.
+
 ## [1.0.0] - 2026-09-18
 
 This major release introduces the ms-style DocFX template, a Microsoft Learn-styled API reference template with type-first headings and responsive navigation. It includes a multi-stage Docker build optimization, an upgrade to DocFX 2.80.1, floating version tags for flexible Docker image pulling, and comprehensive adoption documentation for consuming repositories.
@@ -67,6 +75,7 @@ This is the initial release of the DocFX builder Docker image.
 - Added a DocFX builder Docker image that includes the default and modern templates,
 - Added support for running the DocFX build process in a container.
 
+[1.0.1]: https://github.com/codebeltnet/docfx/compare/v1.0.0..v1.0.1
 [1.0.0]: https://github.com/codebeltnet/docfx/compare/v0.1.4..v1.0.0
 [0.1.4]: https://github.com/codebeltnet/docfx/compare/v0.1.3..v0.1.4
 [0.1.3]: https://github.com/codebeltnet/docfx/compare/v0.1.2..v0.1.3

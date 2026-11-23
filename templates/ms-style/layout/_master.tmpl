@@ -53,6 +53,11 @@
           }
         })()
       </script>
+      {{#_frameworkApi}}
+      <meta name="docfx:framework-api" content="/{{_frameworkApi}}/">
+      <meta name="docfx:framework-directory" content="{{_frameworkDirectory}}">
+      <script src="{{_rel}}public/framework-view.js"></script>
+      {{/_frameworkApi}}
       <script type="module" src="./{{_rel}}public/docfx.min.js"></script>
       <script defer src="./{{_rel}}public/ms-style.js"></script>
 
@@ -111,6 +116,13 @@
             <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-bs-target="#tocOffcanvas" aria-label="Close"></button>
           </div>
           <div class="offcanvas-body">
+            {{#_frameworkApi}}
+            <div id="framework-view" class="mb-2" hidden>
+              <label for="framework-view-select" class="form-label">Framework</label>
+              <select id="framework-view-select" class="form-select form-select-sm" aria-describedby="framework-view-status"></select>
+              <p id="framework-view-status" class="small text-body-secondary mb-0 mt-1" role="status"></p>
+            </div>
+            {{/_frameworkApi}}
             <nav class="toc" id="toc"></nav>
           </div>
         </div>

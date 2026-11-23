@@ -550,6 +550,19 @@ body.ms-style .ms-inline-affix {
   display: none;
 }
 
+body.ms-style .sr-item:has(.item-title > a[data-framework-url]) .item-href {
+  display: none;
+}
+
+body.ms-style .sr-item .item-title > a[data-framework-url]::after {
+  content: attr(data-framework-url);
+  display: block;
+  color: var(--bs-secondary-color);
+  font-size: 0.875rem;
+  font-weight: normal;
+  overflow-wrap: anywhere;
+}
+
 body.ms-style .toc .filter {
   position: relative;
   flex: 0 0 auto;

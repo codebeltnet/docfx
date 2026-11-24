@@ -1,8 +1,21 @@
 # Framework view regression tests
 
-The fixture documents two small projects under `/api/runtime/` and `/api/utilities/`. Conditional APIs distinguish the five framework views. The pinned shared OCI generator writes the availability manifest, native xref maps, search indexes and NGINX configuration. The generator renders with the repository's Docker builder image and extracts `ms-style` from that image. It also serves a separate, standard single-framework build without framework metadata.
+All suites use the [framework views generator in this repository](../../framework-views/README.md). Run the commands from the DocFX repository root or its extracted source archive.
 
-Run from the repository root with PowerShell 7, Docker in Linux-container mode, .NET 11 SDK, DocFX CLI 2.81.0 on the host PATH, and Node.js 20 or newer. Git, NuGet and Docker image downloads require network access.
+Use PowerShell 7, .NET 11 SDK, and DocFX CLI 2.81.0 on the host PATH. Install .NET 8 side by side for the older SDK test. For HTTP tests, use Docker in Linux-container mode. The browser tests also require Node.js 20 or newer and Chromium.
+
+## Native generation and HTTP routing
+
+```powershell
+pwsh -NoProfile -File tests/framework-view/Test-FrameworkViews.ps1 -TestRouting
+pwsh -NoProfile -File tests/framework-view/Test-FrameworkViews.ps1 -ProjectSdk8 -TestRouting
+```
+
+These exercise glob exclusions, nested metadata destinations, per-view project availability, cache reuse, invalidation and isolated recovery. The second command selects .NET 8 for the projects and a modern SDK for the resolver. Without `-TestRouting`, the suite runs without Docker on Windows, Linux or CI.
+
+## Browser and container rendering
+
+Two fixture projects document `/api/runtime/` and `/api/utilities/`. Conditional APIs distinguish five framework views. The test uses the builder image to render with its packaged `ms-style`, then serves the results and an ordinary single-framework build using the shared NGINX Dockerfile. The suite covers the selector, UID and fragment resolution, fallback, direct URLs, navigation, search, and mobile keyboard operation.
 
 ```powershell
 Push-Location tests/framework-view
@@ -12,4 +25,20 @@ Pop-Location
 pwsh -File tests/framework-view/Test-FrameworkView.ps1
 ```
 
-On Linux, install Chromium's system dependencies with `npx playwright install --with-deps chromium` if needed. To check another local revision of the shared action, pass `-ActionPath` with its checkout path. Use `-SkipImageBuild -BuilderImage <tag>` to test an existing builder image.
+On Linux, install Chromium's system dependencies with `npx playwright install --with-deps chromium` if needed. Use `-SkipImageBuild -BuilderImage <image-reference>` to test an existing builder image. To run the complete generator inside the builder, copy `fixture/` into a temporary consumer checkout and use the [image invocation](../../framework-views/README.md#run-in-the-builder-image) with `apiPath: api`, `defaultFramework: net11.0`, and output outside the fixture directory.
+
+## Cuemon.Kernel and Cuemon.IO
+
+The test uses the authored Cuemon project mappings, filter, overwrites, template, and run actions from the [fixture revision](https://github.com/codebeltnet/cuemon/tree/53875b1bbb778067a0a029b87861efdb0b78a8b5). It stages a two-project configuration in the consumer checkout and enables assembly-version alignment for the mixed target graph. Run on Windows or Linux with Git and the native prerequisites above.
+
+```powershell
+$scratch = Join-Path ([IO.Path]::GetTempPath()) "docfx-cuemon-$([guid]::NewGuid().ToString('N'))"
+$consumer = "$scratch/consumer"
+$output = "$scratch/output"
+git clone --single-branch --branch v11.0.0/docfx https://github.com/codebeltnet/cuemon.git $consumer
+git -C $consumer checkout --detach 53875b1bbb778067a0a029b87861efdb0b78a8b5
+pwsh -NoProfile -File tests/framework-view/cuemon/Build-CuemonFixture.ps1 -ConsumerRoot $consumer -OutputRoot $output
+pwsh -NoProfile -File tests/framework-view/cuemon/Test-CuemonFrameworkViews.ps1 -Workspace $output
+```
+
+The acceptance test checks the native xref inventory against every served API and fragment, framework-specific TOCs and search, overload and inheritance differences, source and run-action links, overwrite examples, and HTTP caching. It expects 557, 557, 76 and 548 metadata UIDs in framework order. Pass `-BuilderImage <image-reference>` to the fixture build to render in the container, or `-Origin <url>` to the acceptance test to check an already running server.

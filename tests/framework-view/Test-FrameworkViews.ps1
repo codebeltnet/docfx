@@ -70,7 +70,33 @@ Set-Content "$docs/index.md" '# Shared concept'
 @{ apiPath = 'reference'; defaultFramework = $defaultTfm } |
     ConvertTo-Json | Set-Content -LiteralPath $settings
 
+if (!$ProjectSdk8) {
+    $sourceTemplate = "$PSScriptRoot/../../templates/ms-style"
+    $override = "$root/ms-style-override"
+    Copy-Item -LiteralPath $sourceTemplate -Destination $override -Recurse
+    $overrideSettings = "$docs/framework-views-override.json"
+    @{ apiPath = 'reference'; defaultFramework = $defaultTfm; templatePath = '../ms-style-override' } |
+        ConvertTo-Json | Set-Content -LiteralPath $overrideSettings
+    $marker = "$override/framework-views.compat"
+    $invalidContracts = @{ stale = 'framework-views-v0/docfx-2.81.0'; empty = '' }
+    foreach ($state in $invalidContracts.Keys) {
+        [IO.File]::WriteAllText($marker, $invalidContracts[$state])
+        $invalidOutput = "$root/incompatible-$state"
+        try {
+            & $build -DocfxConfig $config -SettingsPath $overrideSettings -OutputRoot $invalidOutput
+            throw "A template override with a $state marker was accepted."
+        } catch {
+            if ($_.Exception.Message -notlike 'Incompatible ms-style template*framework-views.compat*') { throw }
+        }
+        if (Test-Path -LiteralPath "$invalidOutput/discovery.log") { throw 'Discovery ran before template validation.' }
+    }
+    Copy-Item -LiteralPath "$sourceTemplate/framework-views.compat" -Destination $marker -Force
+    $arguments.SettingsPath = $overrideSettings
+    Write-Host 'Template overrides with stale and empty markers were rejected before discovery.'
+}
+
 & $build @arguments -OutputRoot "$root/fresh"
+$arguments.SettingsPath = $settings
 if ($ProjectSdk8 -and [version](Get-Content -LiteralPath "$root/fresh/resolver-sdk.log" -Raw).Trim().Split('-')[0] -lt [version]'10.0') {
     throw 'The resolver did not select a modern SDK independently of the project pin.'
 }

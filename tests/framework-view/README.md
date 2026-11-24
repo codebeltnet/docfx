@@ -2,7 +2,7 @@
 
 All suites use the [framework views generator in this repository](../../framework-views/README.md). Run the commands from the DocFX repository root or its extracted source archive.
 
-Use PowerShell 7, .NET 11 SDK, and DocFX CLI 2.81.0 on the host PATH. Install .NET 8 side by side for the older SDK test. For HTTP tests, use Docker in Linux-container mode. The browser tests also require Node.js 20 or newer and Chromium.
+Use PowerShell 7 on the host. The native and browser suites also require the .NET 11 SDK and DocFX CLI 2.81.0 on the host PATH. Install .NET 8 side by side for the older SDK test. For HTTP tests, use Docker in Linux-container mode. The browser tests also require Node.js 20 or newer and Chromium.
 
 ## Native generation and HTTP routing
 
@@ -13,9 +13,15 @@ pwsh -NoProfile -File tests/framework-view/Test-FrameworkViews.ps1 -ProjectSdk8 
 
 These exercise glob exclusions, nested metadata destinations, per-view project availability, cache reuse, invalidation and isolated recovery. The second command selects .NET 8 for the projects and a modern SDK for the resolver. Without `-TestRouting`, the suite runs without Docker on Windows, Linux or CI.
 
-## Browser and container rendering
+## Packaged builder and browser regression
 
-Two fixture projects document `/api/runtime/` and `/api/utilities/`. Conditional APIs distinguish five framework views. The test uses the builder image to render with its packaged `ms-style`, then serves the results and an ordinary single-framework build using the shared NGINX Dockerfile. The suite covers the selector, UID and fragment resolution, fallback, direct URLs, navigation, search, and mobile keyboard operation.
+Two fixture projects document `/api/runtime/` and `/api/utilities/`. Conditional APIs distinguish five framework views. The container test builds the image locally and runs the packaged generator with a clean mounted copy of the fixture. It checks PowerShell, both installed SDKs, DocFX, restore assets, the rendered views and their native xrefs, search indexes, and NGINX routes. The container-only check requires Docker in Linux-container mode.
+
+```powershell
+pwsh -NoProfile -File tests/framework-view/Test-FrameworkView.ps1 -ContainerOnly
+```
+
+The complete suite also tests the host generator with the image providing rendering. It serves that output and an ordinary single-framework site with the shared NGINX Dockerfile. The browser checks cover the selector, UID and fragment resolution, fallback, direct URLs, navigation, search, and mobile keyboard operation.
 
 ```powershell
 Push-Location tests/framework-view
@@ -25,7 +31,7 @@ Pop-Location
 pwsh -File tests/framework-view/Test-FrameworkView.ps1
 ```
 
-On Linux, install Chromium's system dependencies with `npx playwright install --with-deps chromium` if needed. Use `-SkipImageBuild -BuilderImage <image-reference>` to test an existing builder image. To run the complete generator inside the builder, copy `fixture/` into a temporary consumer checkout and use the [image invocation](../../framework-views/README.md#run-in-the-builder-image) with `apiPath: api`, `defaultFramework: net11.0`, and output outside the fixture directory.
+On Linux, install Chromium's system dependencies with `npx playwright install --with-deps chromium` if needed. Use `-SkipImageBuild -BuilderImage <image-reference>` to test an existing builder image. Registry publication and post-publish verification require release approval and registry access. See the [release procedure](../../README.md#publish-and-verify-the-builder-image).
 
 ## Cuemon.Kernel and Cuemon.IO
 

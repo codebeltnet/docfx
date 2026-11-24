@@ -75,11 +75,7 @@ The smooth migration path is therefore:
 
 The shared image contains the template files. After changing `ms-style`, rebuild the shared image before rebuilding consuming repositories. Without `--pull`, Docker uses an existing local image with the requested tag and downloads it only when that image is not available locally. This supports a local-first feedback loop without accidentally replacing a locally built image with the published one.
 
-To intentionally use the published shared image, either run `docker pull codebeltnet/docfx:2.78.5` first or build with `--pull`. The `--pull` option refreshes every base image in the consuming Dockerfile, not only the DocFX image.
-
 Static documentation hosts should serve content-hashed assets with a long-lived `immutable` policy and serve stable DocFX URLs with `Cache-Control: no-store`. The `ms-style` page shell also requests same-origin JSON with the Fetch API's `no-store` cache mode. This bypasses navigation data cached before explicit response policies were added; response headers alone cannot invalidate an entry when the browser satisfies the request without contacting the server.
-
-The Cuemon repository contains the proof of concept for this migration on the `v10.7.2/service-update` branch.
 
 The visual target is the .NET API reference surface represented by [Microsoft Learn](https://learn.microsoft.com/en-us/dotnet/api/system.datetime?view=net-10.0).
 
@@ -91,7 +87,32 @@ For the underlying template model, see:
 - [Custom-template merge guidance](https://dotnet.github.io/docfx/tutorial/howto_create_custom_template.html)
 - [DocFX template CLI reference](https://dotnet.github.io/docfx/reference/docfx-cli-reference/docfx-template.html)
 
-> [!NOTE]
-> Something happened with [DocFX](https://github.com/dotnet/docfx) from version 2.78.0 (for ARM64 architecture). Not sure what, but it seems to be solved using `--platform=$BUILDPLATFORM` in the consuming Dockerfile.
->
-> For more information, see [What changes were applied to 2.78.x?](https://github.com/dotnet/docfx/discussions/10512).
+## Build the builder image locally
+
+From the repository root, use PowerShell 7 and Docker Buildx in Linux-container mode.
+
+```powershell
+pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -Tag docfx-local
+```
+
+The default loads one platform into Docker and tags it as `docfx-local:2.81.0`, `docfx-local:2.81`, `docfx-local:2`, and `docfx-local:latest`. Supply `-Platform linux/amd64` or `-Platform linux/arm64` to select a platform explicitly. AMD64 uses Alpine and ARM64 uses Ubuntu 26.04, whose .NET 11 SDK includes PowerShell 7 on ARM64. Use the corresponding package manager when extending either image.
+
+The script accepts `-DocfxVersion` for the CLI and upstream templates and `-DotnetVersion` for the SDK and runtime used by DocFX. The defaults package DocFX 2.81.0 and the .NET 10 and .NET 11 SDKs. Use `-FrameworkSdkImage` or `-FrameworkSdkArm64Image` to override the final SDK base on the corresponding platform. Keep the base's C library compatible with that platform's SDK stage and ensure the base supplies PowerShell 7. The [framework views compatibility contract](framework-views/README.md#template-compatibility) applies when changing the CLI or template.
+
+## Publish and verify the builder image
+
+For an authorized release, select a Buildx builder that can build `linux/amd64` and `linux/arm64`, using native nodes or emulation. Use `docker buildx inspect --bootstrap` to check the builder's platforms. If needed, create a builder with `docker buildx create --driver docker-container --name docfx-release --use`. Sign in to the destination registry and run the publishing script from the repository root.
+
+```powershell
+pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -Publish
+```
+
+Existing release callers must add `-Publish`. The script sends one multi-platform build directly to the registry under the exact, major/minor, major, and `latest` tags. It verifies that all four tags resolve to the built index digest and fetches both required image configs to verify their platforms. On success it prints `codebeltnet/docfx:2.81.0@sha256:<image-index-digest>`. Use `-ContainerRegistry` and `-Tag` for a different registry namespace or repository.
+
+Inspect the exact tag to retrieve the digest and platform list after release.
+
+```powershell
+docker buildx imagetools inspect codebeltnet/docfx:2.81.0
+```
+
+Use the top-level `Digest` field in `codebeltnet/docfx:2.81.0@sha256:<image-index-digest>`. Record the digest from the approved release alongside the source commit. The version tags can move, including the exact CLI tag when builder content changes. See [Run in the builder image](framework-views/README.md#run-in-the-builder-image) for the consumer command.

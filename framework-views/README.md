@@ -1,18 +1,26 @@
 # Native DocFX framework views
 
-`codebeltnet/docfx` owns the generator, MSBuild discovery, framework-aware `ms-style` template, NGINX routing, and generic site image. The [migrated engine and HTTP regression](https://github.com/codebeltnet/docfx-oci-build/tree/c297fe0fb8d428a0b400ebcf888a9ec5ff61105c) retain native DocFX metadata and rendering for each framework.
+`codebeltnet/docfx` provides the generator, MSBuild discovery, framework-aware `ms-style` template, NGINX routing, and generic site image. It runs native DocFX metadata generation and rendering for each framework.
 
 ## Run on Windows or Linux
 
-Use PowerShell 7, Git, DocFX CLI **2.81.0** installed as a .NET tool, and the SDK selected by the consumer's `global.json` or required by its projects. Install .NET 10 or later alongside an older project SDK for the file-based discovery tool. A .NET 11 consumer needs a .NET 11 SDK. The DocFX CLI also needs its .NET 10 runtime. Run from any directory and pass paths to the consumer's configuration, settings, and an empty output directory outside the directory containing `docfx.json`.
+Use PowerShell 7, Git, DocFX CLI **2.81.0** installed as a .NET tool, and the SDK selected by the consumer's `global.json` or required by its projects. Install .NET 10 or later alongside an older project SDK for the file-based discovery tool. A .NET 11 consumer needs a .NET 11 SDK. The DocFX CLI also needs its .NET 10 runtime. Install it with `dotnet tool install --tool-path <dir> docfx --version 2.81.0` and put that directory on `PATH`, or install it as a global tool. The generator reads the CLI's file-mapping libraries from its tool store.
+
+From the consumer root, download the approved source archive by full commit SHA and run the generator. Keep the archive layout so the generator can find `templates/ms-style/`. For local development, set `$distribution` to a DocFX checkout. Use an empty output directory outside the directory containing `docfx.json`.
 
 ```powershell
-pwsh -NoProfile -File /path/to/docfx/framework-views/Build-DocfxFrameworkViews.ps1 `
+$commit = '<full-release-commit-sha>'
+$releaseRoot = Join-Path ([IO.Path]::GetTempPath()) "docfx-source-$([guid]::NewGuid())"
+New-Item -ItemType Directory -Path $releaseRoot | Out-Null
+$archive = Join-Path $releaseRoot 'docfx.zip'
+Invoke-WebRequest "https://codeload.github.com/codebeltnet/docfx/zip/$commit" -OutFile $archive
+Expand-Archive -LiteralPath $archive -DestinationPath $releaseRoot
+$distribution = Join-Path $releaseRoot "docfx-$commit"
+
+pwsh -NoProfile -File "$distribution/framework-views/Build-DocfxFrameworkViews.ps1" `
     -DocfxConfig .docfx/docfx.json -SettingsPath .docfx/framework-views.json `
     -OutputRoot .artifacts/framework-views
 ```
-
-Use the GitHub source archive for an approved **full release commit SHA**. Keep `framework-views/` and `templates/ms-style/` in their original relative layout. The generator uses the template from that distribution by default. For a local development build, point the same command at a DocFX checkout. Install the CLI with `dotnet tool install --tool-path <dir> docfx --version 2.81.0` and put that directory on `PATH`, or install it as a global tool. The generator reads the pinned CLI's file-mapping libraries from its tool store.
 
 ### Settings
 
@@ -38,13 +46,17 @@ Use the GitHub source archive for an approved **full release commit SHA**. Keep 
 
 The generator restores selected projects by default. Use `-NoRestore` when their restore assets already match the build inputs. To reuse metadata, pass `-MetadataCache <directory>` and `-MetadataCacheKey <fingerprint>`. Keep the cache outside the DocFX input directory. The caller's fingerprint must cover the source tree and revision, imported build files, SDK pins and restore inputs, and metadata filters. The generator also hashes its metadata implementation, DocFX config and resolved mappings, selected SDKs, CLI version, and relevant framework settings. Cached metadata is verified for each view. A damaged entry is regenerated independently. `-ForceMetadata` regenerates and refreshes entries. HTML is rendered each time. Use a fresh output directory when retrying a partial build.
 
+### Template compatibility
+
+The generator checks DocFX 2.81.0 and the template root's [`framework-views.compat`](../templates/ms-style/framework-views.compat) marker before discovery. The current marker is `framework-views-v1/docfx-2.81.0`. Pin a full source commit or builder image digest for releases. To test unreleased template changes, set `templatePath` to a working copy that implements the same contract and carries the marker. This check also applies to templates supplied by a rendering image. CLI upgrades require verifying the generator's project mapping APIs and the template's search integration before updating the contract.
+
 ## Run in the builder image
 
-The existing `codebeltnet/docfx` image distributes the same script and packaging assets at `/opt/docfx/framework-views/` with the matching templates at `/opt/docfx/templates/`. The stock image includes PowerShell and the .NET 10 and .NET 11 SDKs, while the .NET 10 runtime runs DocFX 2.81.0. For other SDK pins, run from the source distribution with the required SDKs on the host or supply them in a derived builder. Keep the generator, CLI and template from the same approved release when possible. The generator binds to the CLI's project mapping API, and the template integrates with that CLI's search worker. A CLI upgrade requires verifying both.
+The shared builder image distributes the same script and packaging assets at `/opt/docfx/framework-views/` and matching templates at `/opt/docfx/templates/`. It includes PowerShell 7, the .NET 10 and .NET 11 SDKs, and DocFX 2.81.0. The consumer's `global.json` can select an installed project SDK independently of the resolver. For other SDK pins, run from the source distribution with the required SDKs on the host or supply them in a derived builder.
 
-After publication, pin the approved builder as `codebeltnet/docfx:2.81.0@sha256:<image-index-digest>`. Source releases are pinned by full Git commit SHA because the image tag identifies the CLI version. The released digest identifies the exact image contents, including the generator and template. For branch testing, build the existing Dockerfile locally with `docker build -t docfx-framework-views:local /path/to/docfx` and substitute that tag below.
+Use the approved image index digest from [Publish and verify the builder image](../README.md#publish-and-verify-the-builder-image). For branch testing, [build the image locally](../README.md#build-the-builder-image-locally) and substitute `docfx-local:2.81.0` below.
 
-From the consumer root, use a settings file without `builderImage` to run the whole build inside one container. Mount the checkout writable for restore and build outputs.
+From the consumer root, omit `builderImage` from the settings to run discovery, restore, metadata generation, rendering, and site packaging inside one container. Mount the checkout writable for restore and build outputs.
 
 ```powershell
 $builder = 'codebeltnet/docfx:2.81.0@sha256:<image-index-digest>'
@@ -68,13 +80,10 @@ docker build -f /path/to/docfx/framework-views/framework-views.Dockerfile -t my-
 docker run --rm -p 127.0.0.1:8080:8080 my-docs:local
 ```
 
-## Migration contract for `docfx-oci-build`
+## OCI action integration
 
-1. Pin one approved `codebeltnet/docfx` full source commit SHA in the action's multi-framework path. Fetch and extract `https://codeload.github.com/codebeltnet/docfx/zip/<full-commit-sha>` into the action's temporary directory, or use an equivalent source checkout pinned to that SHA. Keep the source tree layout. If the consumer specifies `builderImage`, pin the matching published image digest in its settings.
-2. When `framework-views` is configured, resolve both consumer input paths against the workspace and call `framework-views/Build-DocfxFrameworkViews.ps1 -DocfxConfig <absolute-config> -SettingsPath <absolute-settings> -OutputRoot <empty-temp-output>`. Put DocFX 2.81.0 on the runner's PATH and ensure the required consumer SDKs are installed. Propagate the exit status. Optional cache inputs may be passed through using the generator's existing switches.
-3. Stage `site/` and `nginx.conf` as the primary OCI build context. Resolve the existing `bundled-framework-views` option to `framework-views/framework-views.Dockerfile` in the **same pinned DocFX source**. For a custom Dockerfile, retain the workspace-relative override and the `docfx-source` named context pointing to the directory containing the consumer's `docfx.json`. The manifest travels inside `site/`.
-4. Delete the action's copies of the framework generator, resolver, NGINX template, generic Dockerfile and generator regression. Keep action contract tests for pin selection, argument forwarding, Dockerfile selection and staging. For ordinary builds, preserve the current stock DocFX and consumer Dockerfile entry points. Release revision checks, Buildx orchestration, OCI annotations, archive output, checksums and verification remain in the action.
+To adopt this distribution for multi-framework builds in the [`docfx-oci-build` action](https://github.com/codebeltnet/docfx-oci-build), pin it by full commit SHA. The action integration resolves the consumer config and settings against its workspace, invokes the generator above with absolute paths and an empty output directory, and propagates its exit status. Optional cache inputs use the same generator switches. Runner prerequisites and optional digest-pinned rendering match the source invocation.
 
-Update any local consumer wrapper that downloads the old action to pin the same DocFX source release. Move framework selection, API path, and assembly-version alignment from direct flags into its settings JSON.
+The action stages `site/` and `nginx.conf` as the primary OCI build context. Its `bundled-framework-views` option resolves to `framework-views/framework-views.Dockerfile` from the same pinned source. A custom Dockerfile can use the `docfx-source` named context for the directory containing the consumer's DocFX configuration. The action owns release revision checks, Buildx orchestration, OCI annotations, archive output, checksums, and artifact verification.
 
 The [regression guide](../tests/framework-view/README.md) covers synthetic projects, SDK pins, the isolated Cuemon fixture, and browser behavior.

@@ -57,6 +57,6 @@ The opt-in [DocFX framework views generator](../../framework-views/README.md) su
 
 Each view keeps the public API pathname and uses `?view=` for explicit selection. The query-aware NGINX configuration also exposes the native search index for the selected framework. The template applies public URLs to search destinations and their secondary labels. Without framework build metadata, the template uses the standard DocFX navigation and search.
 
-The OCI generator serves navigation files under the configured API root per framework. Keep the top-level TOC shared by linking to API landing pages available in every view. Keep framework-specific TOCs under the API root.
+The generated NGINX configuration serves navigation files under the configured API root per framework. Keep the top-level TOC shared by linking to API landing pages available in every view. Keep framework-specific TOCs under the API root.
 
-The [browser regression suite](../../tests/framework-view/README.md) builds and tests the template as packaged in the Docker builder.
+The generator uses [`framework-views.compat`](framework-views.compat) to check the [template compatibility contract](../../framework-views/README.md#template-compatibility). The [regression suite](../../tests/framework-view/README.md) exercises the template as packaged in the builder image.

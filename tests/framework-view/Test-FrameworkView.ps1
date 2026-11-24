@@ -2,8 +2,7 @@
 [CmdletBinding()]
 param(
     [string] $BuilderImage = 'docfx-framework-view:test',
-    [string] $NginxImage = 'dhi.io/nginx:1.31-alpine',
-    [string] $ActionPath,
+    [string] $NginxImage,
     [switch] $SkipImageBuild
 )
 
@@ -16,11 +15,6 @@ $container = $null
 $previousOrigin = $env:DOCFX_TEST_ORIGIN
 New-Item -ItemType Directory -Path $work | Out-Null
 try {
-    if (!$ActionPath) {
-        $ActionPath = "$work/action"
-        git clone -q https://github.com/codebeltnet/docfx-oci-build.git $ActionPath
-        git -C $ActionPath checkout -q --detach c297fe0fb8d428a0b400ebcf888a9ec5ff61105c
-    }
     if (!$SkipImageBuild) {
         docker build -t $BuilderImage $repo
     }
@@ -31,7 +25,7 @@ try {
         builderImage = $BuilderImage
     } | ConvertTo-Json | Set-Content -LiteralPath "$work/fixture/framework-views.json"
 
-    & "$ActionPath/scripts/Build-DocfxFrameworkViews.ps1" -DocfxConfig "$work/fixture/docfx.json" `
+    & "$repo/framework-views/Build-DocfxFrameworkViews.ps1" -DocfxConfig "$work/fixture/docfx.json" `
         -SettingsPath "$work/fixture/framework-views.json" -OutputRoot $output
 
     # Reuse the native .NET 10 metadata to render an ordinary site with the packaged template.
@@ -44,9 +38,16 @@ try {
     docker run --rm --mount "type=bind,source=$single,target=/stage" -w /stage $BuilderImage docfx build docfx.json --warningsAsErrors
     Copy-Item -LiteralPath "$single/_site" -Destination "$output/site/single" -Recurse
 
-    $container = docker run --rm -d -p 127.0.0.1::8080 `
-        --mount "type=bind,source=$output/site,target=/usr/share/nginx/html,readonly" `
-        --mount "type=bind,source=$output/nginx.conf,target=/etc/nginx/conf.d/default.conf,readonly" $NginxImage
+    $imageContext = "$work/image"
+    New-Item -ItemType Directory -Path $imageContext | Out-Null
+    Move-Item -LiteralPath "$output/site", "$output/nginx.conf" -Destination $imageContext
+    $buildArguments = @(
+        '--quiet', '--file', "$repo/framework-views/framework-views.Dockerfile"
+        if ($NginxImage) { '--build-arg', "NGINX_IMAGE=$NginxImage" }
+        $imageContext
+    )
+    $siteImage = docker build @buildArguments
+    $container = docker run --rm -d -p 127.0.0.1::8080 $siteImage
     $endpoint = (docker port $container 8080/tcp).Trim()
     $env:DOCFX_TEST_ORIGIN = "http://$endpoint"
     Push-Location $PSScriptRoot

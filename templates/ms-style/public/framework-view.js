@@ -10,9 +10,10 @@
 
     const toc = meta('tocrel');
     if (toc?.content) {
-        const url = new URL(toc.content.replace(/\.html$/i, '.json'), current);
+        const url = new URL(toc.content, current);
         if (url.origin === current.origin && url.pathname.startsWith(api)) {
-            url.searchParams.set('view', view);
+            url.pathname = url.pathname.replace(/\.html$/i, '.json');
+            setView(url, view);
             toc.content = url.href;
         }
     }
@@ -20,6 +21,13 @@
     const searchRoot = `/_framework-search/${meta('framework-directory').content}/`;
     const search = meta('rel');
     if (search) search.content = searchRoot;
+
+    function setView(url, selected) {
+        for (const key of [...url.searchParams.keys()]) {
+            if (key !== 'view' && key.toLowerCase() === 'view') url.searchParams.delete(key);
+        }
+        url.searchParams.set('view', selected);
+    }
 
     function preserveView(anchor) {
         const href = anchor.getAttribute('href');
@@ -29,7 +37,7 @@
         const fromSearch = url.pathname.startsWith(searchRoot);
         if (fromSearch) url.pathname = '/' + url.pathname.slice(searchRoot.length);
         const isApi = url.pathname.startsWith(api);
-        if (isApi) url.searchParams.set('view', view);
+        if (isApi) setView(url, view);
         if (fromSearch || isApi) {
             const canonical = url.pathname + url.search + url.hash;
             if (canonical !== href) anchor.setAttribute('href', canonical);
@@ -57,11 +65,25 @@
     document.addEventListener('DOMContentLoaded', () => updateLinks(document));
 
     function frameworkName(entry) {
+        const framework = /^net([1-4])(\d)(\d*)$/.exec(entry.tfm);
+        if (framework) return `.NET Framework ${framework.slice(1).filter(Boolean).join('.')}`;
+
         const match = /^(netstandard|netcoreapp|net)(\d+)\.(\d+)$/.exec(entry.tfm);
         if (!match) return entry.tfm;
         const product = { netstandard: '.NET Standard', netcoreapp: '.NET Core', net: '.NET' }[match[1]];
         const version = match[1] === 'net' && match[3] === '0' ? match[2] : `${match[2]}.${match[3]}`;
         return `${product} ${version}`;
+    }
+
+    function findAnchor(fragment) {
+        if (!fragment) return null;
+        const anchor = document.getElementById(fragment);
+        if (anchor) return anchor;
+        try {
+            return document.getElementById(decodeURIComponent(fragment));
+        } catch {
+            return null;
+        }
     }
 
     async function initializeSelector() {
@@ -107,12 +129,12 @@
         select.addEventListener('change', async () => {
             const requested = select.value;
             select.value = displayed;
+            if (requested === displayed) return;
             select.disabled = true;
             status.textContent = '';
             try {
                 const page = new URL(location.href);
-                const fragment = page.hash.slice(1);
-                const anchor = document.getElementById(fragment) || document.getElementById(decodeURIComponent(fragment));
+                const anchor = findAnchor(page.hash.slice(1));
                 const uid = anchor?.dataset.uid || article.dataset.uid;
                 const index = order.indexOf(requested);
                 const candidates = new Set([requested, ...order.slice(0, index).reverse(), displayed, ...order.slice(index + 1)]);
@@ -127,8 +149,8 @@
                     for (const [key, value] of page.searchParams) {
                         if (key.toLowerCase() !== 'view') target.searchParams.append(key, value);
                     }
-                    target.searchParams.set('view', candidate);
-                    if (!target.hash) target.hash = page.hash;
+                    setView(target, candidate);
+                    if (!target.hash && anchor && uid === article.dataset.uid) target.hash = page.hash;
                     if (target.href === location.href) return;
 
                     if (candidate !== requested) {

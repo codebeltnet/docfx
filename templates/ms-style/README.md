@@ -56,3 +56,7 @@ This is the only content-model migration required. Existing DocFX YAML, Markdown
 The opt-in framework build from `docfx-oci-build` supplies `_frameworkApi`, `_frameworkDirectory`, and `/framework-views.json`. On API pages, the template puts the framework selector above the TOC and uses the native xref map for each view to find the current API. The selector follows the configured newest-to-oldest order, keeps the reader in the current view when that is the best available choice, and reports which view it displays. Availability refers to published documentation.
 
 Each view keeps the public API pathname and uses `?view=` for explicit selection. The query-aware NGINX configuration also exposes the native search index for the selected framework. The template applies public URLs to search destinations and their secondary labels. Without framework build metadata, the template uses the standard DocFX navigation and search.
+
+The OCI generator serves navigation files under the configured API root per framework. Keep the top-level TOC shared by linking to API landing pages available in every view. Keep framework-specific TOCs under the API root.
+
+The [browser regression suite](../../tests/framework-view/README.md) builds and tests the template as packaged in the Docker builder.

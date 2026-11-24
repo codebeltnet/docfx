@@ -2,6 +2,9 @@
 ARG DOTNET_VERSION=10.0
 ARG FRAMEWORK_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:11.0-alpine3.24@sha256:52556c0fb9d0f609ae9aeab9efeeba96f4acc2f7038f7696f2235ccbdbb8e290
 
+ARG FRAMEWORK_SDK_ARM64_IMAGE=mcr.microsoft.com/dotnet/sdk:11.0-resolute@sha256:2794448a07118a6eaf00f29ab5d2bf44928517ce5ff86505a63a69230374f599
+ARG TARGETARCH
+
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION}-alpine AS template-build
 
 ARG DOCFX_VERSION
@@ -15,20 +18,25 @@ RUN git clone --depth 1 --branch v${DOCFX_VERSION} https://github.com/dotnet/doc
 
 COPY templates/ms-style /opt/docfx/templates/ms-style
 
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION}-alpine AS dotnet-sdk
+# The Alpine SDK omits PowerShell on ARM64. Match both SDKs to the final image's libc.
+FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION}-alpine AS dotnet-sdk-amd64
+FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION}-resolute AS dotnet-sdk-arm64
+FROM dotnet-sdk-${TARGETARCH} AS dotnet-sdk
 
 ARG DOCFX_VERSION
 
 RUN dotnet tool install --global docfx --version ${DOCFX_VERSION}
 
-# The .NET 11 SDK image includes PowerShell. Keep .NET 10 for DocFX and consumers pinned to that SDK.
-FROM --platform=$BUILDPLATFORM ${FRAMEWORK_SDK_IMAGE} AS final
+FROM ${FRAMEWORK_SDK_IMAGE} AS framework-sdk-amd64
+FROM ${FRAMEWORK_SDK_ARM64_IMAGE} AS framework-sdk-arm64
+FROM framework-sdk-${TARGETARCH} AS final
 
 ENV DOTNET_ROOT=/usr/share/dotnet
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=true
 ENV PATH=$PATH:$DOTNET_ROOT:/root/.dotnet/tools
 
-RUN apk --no-cache add git bash libatomic
+RUN if command -v apk >/dev/null; then apk --no-cache add git bash libatomic; fi \
+    && pwsh -NoProfile -Command 'if ($PSVersionTable.PSVersion.Major -ne 7) { exit 1 }'
 
 COPY --from=dotnet-sdk /usr/share/dotnet/sdk /usr/share/dotnet/sdk
 COPY --from=dotnet-sdk /usr/share/dotnet/packs /usr/share/dotnet/packs

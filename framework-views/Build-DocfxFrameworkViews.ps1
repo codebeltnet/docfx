@@ -91,6 +91,36 @@ $version = $version.Trim()
 if (($version -split '\+', 2)[0] -cne $supportedDocfx) {
     throw "Framework views use DocFX $supportedDocfx for project discovery. Install that CLI version (found '$version')."
 }
+
+$shared = "$work/shared"
+New-Item -ItemType Directory -Path $shared | Out-Null
+if ($builderImage) {
+    Invoke-Step "$work/builder-version.log" docker @('run', '--rm', $builderImage, 'docfx', '--version')
+    $builderVersion = (Get-Content -LiteralPath "$work/builder-version.log" -Raw).Trim()
+    if (($builderVersion -split '\+', 2)[0] -cne $supportedDocfx) {
+        throw "Framework views use DocFX $supportedDocfx for rendering. The builder image reports '$builderVersion'."
+    }
+}
+if ($sharedTemplatePath) {
+    Copy-Item -LiteralPath $sharedTemplatePath -Destination "$shared/ms-style" -Recurse
+} else {
+    Invoke-Step "$work/templates.log" docker @('run', '--rm', '--mount', "type=bind,source=$shared,target=/stage",
+        $builderImage, 'cp', '-R', '/opt/docfx/templates/ms-style', '/stage/ms-style')
+}
+$templateSource = if ($sharedTemplatePath) { $sharedTemplatePath } else { "$builderImage (/opt/docfx/templates/ms-style)" }
+$expectedContract = "framework-views-v1/docfx-$supportedDocfx"
+$marker = "$shared/ms-style/framework-views.compat"
+$templateContract = if (Test-Path -LiteralPath $marker -PathType Leaf) {
+    [IO.File]::ReadAllText($marker).Trim()
+}
+if ($templateContract -cne $expectedContract) {
+    $actualContract = if ($templateContract) { "'$templateContract'" } else { 'missing or empty' }
+    throw "Incompatible ms-style template at '$templateSource'. Expected '$expectedContract' in framework-views.compat, found $actualContract."
+}
+if (!(Test-Path -LiteralPath "$shared/ms-style/public/framework-view.js" -PathType Leaf)) {
+    throw "Incompatible ms-style template at '$templateSource'. Missing public/framework-view.js."
+}
+
 $store = Join-Path (Split-Path -Parent $docfx) ".store/docfx/$supportedDocfx/docfx/$supportedDocfx/tools"
 if (!(Test-Path -LiteralPath $store -PathType Container)) {
     throw "DocFX $supportedDocfx mapping libraries were not found in '$store'. Install DocFX as a global or --tool-path .NET tool."
@@ -179,25 +209,6 @@ try {
         $view = if ($tfm.Contains('.')) { "$($Matches[1])-$($Matches[2]).$($Matches[3])" } else { $tfm }
         $directory = if ($tfm -cmatch '^net([5-9]|[1-9]\d+)\.0$') { "net$($Matches[1])" } else { $tfm }
         $views[$view] = [ordered]@{ tfm = $tfm; directory = $directory; xref = "/xrefmap.yml?view=$view"; projects = @() }
-    }
-
-    $shared = "$work/shared"
-    New-Item -ItemType Directory -Path $shared | Out-Null
-    if ($builderImage) {
-        Invoke-Step "$work/builder-version.log" docker @('run', '--rm', $builderImage, 'docfx', '--version')
-        $builderVersion = (Get-Content -LiteralPath "$work/builder-version.log" -Raw).Trim()
-        if (($builderVersion -split '\+', 2)[0] -cne $supportedDocfx) {
-            throw "Framework views use DocFX $supportedDocfx for rendering. The builder image reports '$builderVersion'."
-        }
-    }
-    if ($SharedTemplatePath) {
-        Copy-Item -LiteralPath $SharedTemplatePath -Destination "$shared/ms-style" -Recurse
-    } else {
-        Invoke-Step "$work/templates.log" docker @('run', '--rm', '--mount', "type=bind,source=$shared,target=/stage",
-            $BuilderImage, 'cp', '-R', '/opt/docfx/templates/ms-style', '/stage/ms-style')
-    }
-    if (!(Test-Path -LiteralPath "$shared/ms-style/public/framework-view.js" -PathType Leaf)) {
-        throw 'Use an ms-style template with framework view support.'
     }
 
     $sdk = (& dotnet --version).Trim()

@@ -1,12 +1,12 @@
 {
   "metadata": [
     {
-      "src": [{ "files": ["Runtime/Runtime.csproj"] }],
+      "src": [{ "src": "..", "files": ["Runtime/Runtime.csproj"] }],
       "dest": "api/runtime",
       "memberLayout": "separatePages"
     },
     {
-      "src": [{ "files": ["Utilities/Utilities.csproj"] }],
+      "src": [{ "src": "..", "files": ["Utilities/Utilities.csproj"] }],
       "dest": "api/utilities",
       "memberLayout": "separatePages"
     }

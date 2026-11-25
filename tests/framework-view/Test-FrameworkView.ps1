@@ -15,12 +15,16 @@ $output = "$work/output"
 $container = $null
 $previousOrigin = $env:DOCFX_TEST_ORIGIN
 
+function Copy-Fixture([string] $Destination) {
+    Copy-Item -LiteralPath "$PSScriptRoot/fixture" -Destination $Destination -Recurse
+    $docs = New-Item -ItemType Directory -Path "$Destination/.docfx"
+    Move-Item -LiteralPath "$Destination/docfx.json", "$Destination/index.md", "$Destination/toc.yml" -Destination $docs.FullName
+}
+
 function Test-PackagedGenerator {
     $fixture = "$work/container-fixture"
-    $destination = "$work/container-output"
-    Copy-Item -LiteralPath "$PSScriptRoot/fixture" -Destination $fixture -Recurse
-    @{ apiPath = 'api'; defaultFramework = 'net11.0' } |
-        ConvertTo-Json | Set-Content -LiteralPath "$fixture/framework-views.json"
+    $destination = "$fixture/.bot/docfx"
+    Copy-Fixture $fixture
     New-Item -ItemType Directory -Path "$work/sdk10" | Out-Null
     '{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}' | Set-Content -LiteralPath "$work/sdk10/global.json"
     '{"sdk":{"version":"11.0.100","rollForward":"latestFeature"}}' | Set-Content -LiteralPath "$fixture/global.json"
@@ -35,12 +39,7 @@ function Test-PackagedGenerator {
         throw "Unexpected builder toolchain. PowerShell: $pwshVersion. DocFX: $docfxVersion. SDKs: $($sdk10[0]), $sdk11."
     }
     Write-Host "Packaged tools: PowerShell $pwshVersion, DocFX $docfxVersion, .NET $($sdk10[0]) and $sdk11."
-    $generatorArguments = @(
-        '-DocfxConfig', 'container-fixture/docfx.json'
-        '-SettingsPath', 'container-fixture/framework-views.json'
-        '-OutputRoot', 'container-output'
-    )
-    docker run --rm --mount $mount -w /workspace $BuilderImage pwsh -NoProfile -File /opt/docfx/framework-views/Build-DocfxFrameworkViews.ps1 @generatorArguments
+    docker run --rm --mount $mount -w /workspace/container-fixture $BuilderImage pwsh -NoProfile -File /opt/docfx/framework-views/Build-DocfxFrameworkViews.ps1
 
     foreach ($project in 'Runtime', 'Utilities') {
         if (!(Test-Path -LiteralPath "$fixture/$project/obj/project.assets.json" -PathType Leaf)) {
@@ -102,21 +101,20 @@ try {
     Test-PackagedGenerator
     if ($ContainerOnly) { return }
 
-    Copy-Item -LiteralPath "$PSScriptRoot/fixture" -Destination "$work/fixture" -Recurse
-    @{
-        apiPath = 'api'
-        defaultFramework = 'net11.0'
-        builderImage = $BuilderImage
-    } | ConvertTo-Json | Set-Content -LiteralPath "$work/fixture/framework-views.json"
-
-    & "$repo/framework-views/Build-DocfxFrameworkViews.ps1" -DocfxConfig "$work/fixture/docfx.json" `
-        -SettingsPath "$work/fixture/framework-views.json" -OutputRoot $output
+    Copy-Fixture "$work/fixture"
+    $docs = "$work/fixture/.docfx"
+    & "$repo/framework-views/Build-DocfxFrameworkViews.ps1" -DocfxConfig "$docs/docfx.json" -OutputRoot $output
+    foreach ($path in 'site/framework-views.json', 'nginx.conf') {
+        $native = (Get-Content -LiteralPath "$output/$path" -Raw).Replace("`r`n", "`n")
+        $packaged = (Get-Content -LiteralPath "$work/container-fixture/.bot/docfx/$path" -Raw).Replace("`r`n", "`n")
+        if ($native -cne $packaged) { throw "Native and packaged generation differ for '$path'." }
+    }
 
     # Reuse the native .NET 10 metadata to render an ordinary site with the packaged template.
     $single = "$work/single"
     New-Item -ItemType Directory -Path $single | Out-Null
-    Copy-Item -LiteralPath "$output/net10/api", "$work/fixture/index.md", "$work/fixture/toc.yml" -Destination $single -Recurse
-    $build = (Get-Content -LiteralPath "$work/fixture/docfx.json" -Raw | ConvertFrom-Json -AsHashtable).build
+    Copy-Item -LiteralPath "$output/net10/api", "$docs/index.md", "$docs/toc.yml" -Destination $single -Recurse
+    $build = (Get-Content -LiteralPath "$docs/docfx.json" -Raw | ConvertFrom-Json -AsHashtable).build
     $build.template[2] = '/opt/docfx/templates/ms-style'
     @{ build = $build } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath "$single/docfx.json"
     docker run --rm --mount "type=bind,source=$single,target=/stage" -w /stage $BuilderImage docfx build docfx.json

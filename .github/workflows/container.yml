@@ -1,0 +1,92 @@
+name: Container validation
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  container:
+    name: Native ${{ matrix.arch.architecture }}
+    runs-on: ${{ matrix.arch.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - { architecture: amd64, runner: ubuntu-26.04 }
+          - { architecture: arm64, runner: ubuntu-26.04-arm }
+    steps:
+      - name: Checkout
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Install OCI transfer tool
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends skopeo
+
+      - name: Enable OCI exporter
+        run: docker buildx create --driver docker-container --use
+
+      - name: Build once and validate exported candidate on native CPU
+        shell: pwsh
+        env:
+          TARGET_PLATFORM: linux/${{ matrix.arch.architecture }}
+          TARGET_ARCH: ${{ matrix.arch.architecture }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Import-Module ./tools/DocfxImage.psm1 -Force
+          $null = Test-DocfxVersionConsistency
+          $engineVersion = if ($env:EVENT_NAME -ceq 'push' -and $env:REF_TYPE -ceq 'tag') {
+              Resolve-ReleaseTagVersion -Tag $env:REF_NAME
+          } else {
+              "0.0.0-ci.$($env:RUN_NUMBER)"
+          }
+          ./BuildAndPushDocfxImage.ps1 `
+              -BuildOnly `
+              -EngineVersion $engineVersion `
+              -Platform $env:TARGET_PLATFORM `
+              -RequireNative `
+              -ArchivePath "./artifacts/docfx.$($env:TARGET_ARCH).oci.tar" `
+              -MetadataFile './artifacts/docfx-image.json' `
+              -PassThru | Format-List
+
+      - name: Preserve exact tested OCI content and native verification record
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-${{ matrix.arch.architecture }}
+          path: artifacts/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Preserve PR validation metadata without large container archives
+        if: github.event_name != 'push' || github.ref_type != 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-metadata-${{ matrix.arch.architecture }}-${{ github.run_attempt }}
+          path: artifacts/*.json
+          if-no-files-found: error
+          retention-days: 7
+
+  quality:
+    name: Both native architectures verified
+    if: always()
+    needs: [container]
+    runs-on: ubuntu-26.04
+    steps:
+      - env:
+          RESULT: ${{ needs.container.result }}
+        run: test "$RESULT" = success

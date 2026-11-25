@@ -1,0 +1,137 @@
+name: Deploy Docker Hub images
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published latest release tag to recover (existing verified artifacts only)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docfx-production
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve approved published release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      engine-version: ${{ steps.resolve.outputs.engine-version }}
+      deployment-sha: ${{ steps.resolve.outputs.deployment-sha }}
+    steps:
+      - name: Checkout deployment tooling from main
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: main
+
+      - id: resolve
+        name: Resolve release identity, ancestry, and asset inventory
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $deploymentSha = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $deploymentSha -cnotmatch '^[0-9a-f]{40}$') {
+              throw 'Unable to resolve deployment tooling revision from main.'
+          }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "deployment-sha=$deploymentSha" -Encoding utf8NoBOM
+          ./tools/Invoke-DocfxRelease.ps1 -Command Resolve
+
+      - name: Preserve resolved release identity
+        uses: actions/upload-artifact@v7
+        with:
+          name: resolved-release
+          path: resolved/*
+          retention-days: 7
+          if-no-files-found: error
+
+  verify:
+    name: Verify durable OCI release artifact
+    needs: [resolve]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout pinned deployment tooling
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ needs.resolve.outputs.deployment-sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Download resolved release identity
+        uses: actions/download-artifact@v8
+        with:
+          name: resolved-release
+          path: resolved
+
+      - name: Reconstruct and validate release run, native results, checksums, and attestations
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/Invoke-DocfxRelease.ps1 -Command Restore
+
+      - name: Verify reconstructed OCI archive with Codebelt verifier
+        uses: codebeltnet/oci-artifact-verify@v1
+        with:
+          archive-path: ${{ github.workspace }}/out/docfx.oci.tar
+          checksum-path: ${{ github.workspace }}/out/docfx.oci.tar.sha256
+          version: ${{ needs.resolve.outputs.engine-version }}
+          revision: ${{ needs.resolve.outputs.sha }}
+
+  publish:
+    name: Promote verified OCI image to Docker Hub
+    needs: [resolve, verify]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    environment: Production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout pinned deployment tooling
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ needs.resolve.outputs.deployment-sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Download resolved release identity
+        uses: actions/download-artifact@v8
+        with:
+          name: resolved-release
+          path: resolved
+
+      - name: Install OCI transfer tool
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends skopeo
+
+      - name: Authenticate, promote without rebuild, and verify published tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export REGISTRY_AUTH_FILE="$RUNNER_TEMP/docfx-auth.json"
+          trap 'rm -f "$REGISTRY_AUTH_FILE"' EXIT
+          printf '%s' "$DOCKERHUB_TOKEN" | skopeo login --authfile "$REGISTRY_AUTH_FILE" --username "$DOCKERHUB_USERNAME" --password-stdin docker.io
+          pwsh -NoProfile -File ./tools/Invoke-DocfxRelease.ps1 -Command Publish

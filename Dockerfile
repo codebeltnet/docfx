@@ -52,4 +52,14 @@ COPY framework-views /opt/docfx/framework-views
 RUN mkdir -p /build/docfx \
     && cp -r /opt/docfx/templates /build/docfx/
 
+ARG DOCFX_VERSION
+
+LABEL org.opencontainers.image.title="Codebelt DocFX Builder" \
+      org.opencontainers.image.description="Codebelt DocFX builder image with shared templates and native multi-framework views generator." \
+      org.opencontainers.image.url="https://github.com/codebeltnet/docfx" \
+      org.opencontainers.image.source="https://github.com/codebeltnet/docfx" \
+      org.opencontainers.image.vendor="Codebelt" \
+      org.opencontainers.image.licenses="MIT" \
+      net.codebelt.docfx.cli.version="${DOCFX_VERSION}"
+
 WORKDIR /build

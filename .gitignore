@@ -1,0 +1,12 @@
+.bot/
+artifacts/
+assets/
+inputs/
+out/
+release/
+resolved/
+*.oci.tar
+*.oci.tar.sha256
+*.oci.part*
+*.published.json
+coverage*.xml

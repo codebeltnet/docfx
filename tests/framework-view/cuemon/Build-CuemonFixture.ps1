@@ -3,7 +3,6 @@
 param(
     [Parameter(Mandatory)][string] $ConsumerRoot,
     [Parameter(Mandatory)][string] $OutputRoot,
-    [string] $BuilderImage,
     [string] $MetadataCache,
     [string] $MetadataCacheKey,
     [switch] $ForceMetadata
@@ -44,16 +43,8 @@ try {
 '@ | Set-Content -LiteralPath "$inputRoot/toc.yml"
     ConvertTo-Json -InputObject $config -Depth 100 | Set-Content -LiteralPath "$inputRoot/docfx.json"
     & "$source/BuildRunActions.ps1" -OutputRoot "$inputRoot/run-actions"
-    $settings = @{
-        apiPath = $group[0].dest
-        defaultFramework = 'net11.0'
-        frameworks = @('net11.0', 'net10.0', 'netstandard2.1', 'netstandard2.0')
-        alignAssemblyVersion = $true
-    }
-    if ($BuilderImage) { $settings.builderImage = $BuilderImage }
-    $settings | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$inputRoot/framework-views.json"
     & "$PSScriptRoot/../../../framework-views/Build-DocfxFrameworkViews.ps1" `
-        -DocfxConfig "$inputRoot/docfx.json" -SettingsPath "$inputRoot/framework-views.json" -OutputRoot $OutputRoot `
+        -DocfxConfig "$inputRoot/docfx.json" -OutputRoot $OutputRoot `
         -MetadataCache $MetadataCache -MetadataCacheKey $MetadataCacheKey -ForceMetadata:$ForceMetadata
     & "$source/TestRunActions.ps1" -ScriptsRoot "$inputRoot/run-actions" -SiteRoot (Join-Path $OutputRoot 'site')
 } finally {

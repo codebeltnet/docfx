@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-11-25
+
+This is a minor release that refactors native framework views onto convention-based discovery and modular metadata helpers, introduces engine-aware Docker image versioning with OCI metadata labels, establishes an automated build-once GitHub Actions CI/CD release and deployment lifecycle, and adds shared PowerShell 7 and .NET 10 delivery tooling with comprehensive unit and OCI verification suites.
+
+### Added
+
+- Added modular framework-views helpers (`framework-views/FrameworkViewConventions.ps1`, `framework-views/DocfxMetadata.ps1`, and `framework-views/KeepCrossTargetReferences.targets`) providing `.docfx/docfx.json` and `.bot/docfx` defaults, `metadata.dest`-derived API roots, MSBuild-evaluated target framework precedence, ownership-tracked output reuse, metadata caching, and cross-target project reference recovery,
+- Added Codebelt engine-aware Docker image versioning (`-EngineVersion`) and build-once OCI export (`-BuildOnly`, `-RequireNative`, `-SkipContainerTest`, `-PassThru`, `-WhatIf`) to `BuildAndPushDocfxImage.ps1`, producing engine-qualified `-v{EngineVersion}` tags (`2-v1.1.0`, `2.81-v1.1.0`, `2.81.0-v1.1.0`) alongside floating convenience tags (`latest`, `2`, `2.81`, `2.81.0`) with strict SemVer and Docker tag validation, prerelease isolation, publish conflict checks, and OCI image metadata labels (`org.opencontainers.image.*`, `net.codebelt.docfx.engine.version`, and `net.codebelt.docfx.cli.version`),
+- Added automated GitHub Actions CI/CD workflows (`.github/workflows/pr.yml`, `.github/workflows/container.yml`, `.github/workflows/release.yml`, and `.github/workflows/deploy.yml`) with `.github/actionlint.yaml`, fixed runners (`ubuntu-26.04`, `ubuntu-26.04-arm`, `windows-2025`), Codebelt actions (`codebeltnet/git-checkout@v1`, `codebeltnet/install-dotnet@v3`, `codebeltnet/oci-artifact-verify@v1`), native AMD64/ARM64 OCI export with SBOM and SLSA provenance, multi-platform index assembly and 1 GiB asset splitting into draft GitHub Releases, and release-approved Docker Hub promotion via Skopeo `--all --preserve-digests` with `Production` environment isolation, idempotent recovery, and stale-release protection,
+- Added shared PowerShell 7 and `.NET 10` file-based C# delivery tooling (`tools/DocfxImage.psm1`, `tools/OciArtifact.cs`, `tools/Invoke-DocfxRelease.ps1`, and `tools/Invoke-UnitTests.ps1`), repository instructions (`AGENTS.md`), and `.dockerignore`/`.gitignore` rules,
+- Added automated Pester 5, OCI, and container verification suites (`tests/BuildAndPushDocfxImage.Tests.ps1`, `tests/ReleaseDelivery.Tests.ps1`, `tests/OciArtifact.Tests.ps1`, `tests/Test-DocfxContainer.ps1`, and `tests/framework-view/Build-DocfxFrameworkViews.Tests.ps1`, `DocfxMetadata.Tests.ps1`, `FrameworkViewConventions.Tests.ps1`) enforcing 100% code coverage across `framework-views/*.ps1`, `BuildAndPushDocfxImage.ps1`, `tools/DocfxImage.psm1`, and `tools/Invoke-DocfxRelease.ps1`.
+
+### Changed
+
+- Refactored `framework-views/Build-DocfxFrameworkViews.ps1` onto `FrameworkViewConventions.ps1` and `DocfxMetadata.ps1`, replacing the mandatory `-SettingsPath` (`framework-views.json`) parameter with `.docfx/docfx.json` and `.bot/docfx` defaults, `metadata.dest`-derived API roots, MSBuild-evaluated framework precedence, StrictMode-safe optional config lookups, and ANSI-stripped metadata diagnostic parsing,
+- Updated `Dockerfile` with `ARG DOCFX_VERSION` and standard `org.opencontainers.image.*` and `net.codebelt.docfx.cli.version` image labels,
+- Refactored `BuildAndPushDocfxImage.ps1` onto `tools/DocfxImage.psm1` and blocked direct `-Publish` targeting official `codebeltnet/docfx` or `docker.io/codebeltnet/docfx` repositories so production releases cannot bypass the build-once promotion lifecycle,
+- Updated `README.md`, `framework-views/README.md`, `templates/ms-style/README.md`, `tests/framework-view/README.md`, and the `tests/framework-view/` integration and Cuemon fixtures (`Test-FrameworkView.ps1`, `Test-FrameworkViews.ps1`, `cuemon/Build-CuemonFixture.ps1`, `fixture/docfx.json`) for convention-based framework views, engine-aware Docker versioning, and the build-once CI/CD release and recovery lifecycle.
+
 ## [1.0.1] - 2026-09-27
 
 This is a patch release that upgrades DocFX to 2.81.0.
@@ -75,6 +94,7 @@ This is the initial release of the DocFX builder Docker image.
 - Added a DocFX builder Docker image that includes the default and modern templates,
 - Added support for running the DocFX build process in a container.
 
+[1.1.0]: https://github.com/codebeltnet/docfx/compare/v1.0.1..v1.1.0
 [1.0.1]: https://github.com/codebeltnet/docfx/compare/v1.0.0..v1.0.1
 [1.0.0]: https://github.com/codebeltnet/docfx/compare/v0.1.4..v1.0.0
 [0.1.4]: https://github.com/codebeltnet/docfx/compare/v0.1.3..v0.1.4

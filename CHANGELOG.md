@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Updated repository documentation (`README.md`, `framework-views/README.md`, `AGENTS.md`) and delivery tests (`tests/BuildAndPushDocfxImage.Tests.ps1`, `tests/ReleaseDelivery.Tests.ps1`) to document and enforce the six-tag versioned Docker image policy (three floating versioned convenience tags and three Codebelt engine-qualified tags).
+
+### Removed
+
+- Removed `:latest` Docker image tag generation and publication support from `Resolve-DocfxImageTagPlan` (`tools/DocfxImage.psm1`) so local builds, build-only OCI exports, release metadata, and Docker Hub promotions emit only versioned convenience tags (`MAJOR`, `MAJOR.MINOR`, `MAJOR.MINOR.PATCH`) and engine-qualified `-v{EngineVersion}` tags.
+
 ## [1.1.0] - 2026-11-25
 
 This is a minor release that refactors native framework views onto convention-based discovery and modular metadata helpers, introduces engine-aware Docker image versioning with OCI metadata labels, establishes an automated build-once GitHub Actions CI/CD release and deployment lifecycle, and adds shared PowerShell 7 and .NET 10 delivery tooling with comprehensive unit and OCI verification suites.
@@ -94,6 +104,7 @@ This is the initial release of the DocFX builder Docker image.
 - Added a DocFX builder Docker image that includes the default and modern templates,
 - Added support for running the DocFX build process in a container.
 
+[Unreleased]: https://github.com/codebeltnet/docfx/compare/v1.1.0..HEAD
 [1.1.0]: https://github.com/codebeltnet/docfx/compare/v1.0.1..v1.1.0
 [1.0.1]: https://github.com/codebeltnet/docfx/compare/v1.0.0..v1.0.1
 [1.0.0]: https://github.com/codebeltnet/docfx/compare/v0.1.4..v1.0.0

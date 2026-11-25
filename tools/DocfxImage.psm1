@@ -109,10 +109,8 @@ function Resolve-DocfxImageTagPlan {
 
     $convenienceTags = if ($Engine -and $Engine.IsPrerelease) {
         @()
-    } elseif ($CliVersion.IsPrerelease) {
-        @($CliVersion.Value)
     } else {
-        @($versionedBases + @('latest'))
+        @($versionedBases)
     }
 
     $engineQualifiedTags = if ($Engine) {
@@ -271,7 +269,7 @@ function Invoke-Skopeo {
             }
         }
 
-        & skopeo @Arguments
+        & skopeo @Arguments | Out-Host
         if ($LASTEXITCODE -ne 0) {
             throw "skopeo $($Arguments[0]) exited with code $LASTEXITCODE."
         }
@@ -322,7 +320,7 @@ function Invoke-Skopeo {
         return [Text.UTF8Encoding]::new($false).GetBytes($joined)
     }
 
-    Invoke-DocfxDocker ($dockerArgs.ToArray())
+    Invoke-DocfxDocker ($dockerArgs.ToArray()) | Out-Host
 }
 
 function Invoke-OciArtifact {
@@ -477,7 +475,7 @@ function Publish-DocfxOciArchive {
                 throw "Engine-qualified tag conflict for '$tag': expected '$expectedDigest', found '$existing'. Refusing to overwrite."
             }
             if ($null -eq $existing) {
-                Invoke-Skopeo -Arguments @('copy', '--all', '--preserve-digests', "oci:$layoutDir", "docker://$tag")
+                $null = Invoke-Skopeo -Arguments @('copy', '--all', '--preserve-digests', "oci:$layoutDir", "docker://$tag")
             }
 
             $raw = Invoke-Skopeo -Arguments @('inspect', '--raw', "docker://$tag") -CaptureOutput
@@ -490,7 +488,7 @@ function Publish-DocfxOciArchive {
 
         if ($convenienceTags.Count -gt 0) {
             if ($BeforeConvenience) {
-                & $BeforeConvenience
+                $null = & $BeforeConvenience
             }
 
             $null = Test-DocfxPromotionPreflight `
@@ -506,7 +504,7 @@ function Publish-DocfxOciArchive {
                 -RequireEngineTagsPresent
 
             foreach ($tag in $convenienceTags) {
-                Invoke-Skopeo -Arguments @('copy', '--all', '--preserve-digests', "oci:$layoutDir", "docker://$tag")
+                $null = Invoke-Skopeo -Arguments @('copy', '--all', '--preserve-digests', "oci:$layoutDir", "docker://$tag")
                 $raw = Invoke-Skopeo -Arguments @('inspect', '--raw', "docker://$tag") -CaptureOutput
                 $actualDigest = 'sha256:' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($raw)).ToLowerInvariant()
                 if ($actualDigest -cne $expectedDigest) {
@@ -521,7 +519,7 @@ function Publish-DocfxOciArchive {
         New-Item -ItemType Directory -Path $verifyDir -Force | Out-Null
         try {
             $downloaded = Join-Path $verifyDir 'registry.oci.tar'
-            Invoke-Skopeo -Arguments @('copy', '--all', '--preserve-digests', "docker://$($preflight.Repository)@$expectedDigest", "oci-archive:$downloaded")
+            $null = Invoke-Skopeo -Arguments @('copy', '--all', '--preserve-digests', "docker://$($preflight.Repository)@$expectedDigest", "oci-archive:$downloaded")
             $verifyArgs = @('verify', $downloaded, '--version', $EngineVersion, '--docfx-version', $DocfxVersion, '--revision', $Revision, '--source', $SourceRepository, '--expected-digest', $expectedDigest, '--no-seal')
             if ($Platform) { $verifyArgs += @('--platform', $Platform) }
             $null = Invoke-OciArtifact -Arguments $verifyArgs

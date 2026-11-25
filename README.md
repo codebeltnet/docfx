@@ -98,17 +98,18 @@ Neither version is inferred from the other. The examples below use DocFX CLI `2.
 
 ### Convenience and engine-qualified tags
 
-For a standard stable release containing one upstream DocFX CLI version, a single multi-platform build associates all seven tags with the same published image index:
+For a standard stable release containing one upstream DocFX CLI version, a single multi-platform build associates all six versioned tags with the same published image index:
 
 | Tag family | Image tag | Meaning |
 | --- | --- | --- |
-| Convenience | `codebeltnet/docfx:latest` | Latest published distribution |
 | Convenience | `codebeltnet/docfx:2` | Latest published distribution within DocFX CLI major version `2` |
 | Convenience | `codebeltnet/docfx:2.81` | Latest published distribution within DocFX CLI minor version `2.81` |
 | Convenience | `codebeltnet/docfx:2.81.0` | Distribution using exact DocFX CLI version `2.81.0` |
 | Engine-qualified | `codebeltnet/docfx:2-v1.1.0` | DocFX CLI major version `2` with Codebelt engine `1.1.0` |
 | Engine-qualified | `codebeltnet/docfx:2.81-v1.1.0` | DocFX CLI minor version `2.81` with Codebelt engine `1.1.0` |
 | Engine-qualified | `codebeltnet/docfx:2.81.0-v1.1.0` | Exact DocFX CLI `2.81.0` with Codebelt engine `1.1.0` |
+
+**Versioned tagging policy:** `codebeltnet/docfx` does not generate, publish, or support a `:latest` Docker image tag. Consumers should always select an explicit versioned convenience tag (`2`, `2.81`, or `2.81.0`), a Codebelt engine-qualified tag (`2-v1.1.0`, `2.81-v1.1.0`, or `2.81.0-v1.1.0`), or a digest-pinned reference.
 
 Prerelease versions never update floating stable convenience tags:
 
@@ -117,7 +118,7 @@ Prerelease versions never update floating stable convenience tags:
 
 ### Consumer control levels
 
-Existing consumers do not need to migrate; unqualified convenience tags remain supported with their established behavior. Choose the reference level that matches your reproducibility needs:
+Versioned convenience tags (`2`, `2.81`, `2.81.0`) remain supported, while `:latest` is intentionally not published or supported. Choose the reference level that matches your reproducibility needs:
 
 - **Convenience** (for example, `codebeltnet/docfx:2` or `codebeltnet/docfx:2.81.0`): automatically receives updated Codebelt engine releases for that DocFX CLI scope. Convenient for low-maintenance builds, but pulling a newer image can introduce breaking Codebelt engine changes independently of the upstream DocFX CLI.
 - **Explicit version selection** (for example, `codebeltnet/docfx:2-v1.1.0` or `codebeltnet/docfx:2.81.0-v1.1.0`): selects a specific Codebelt engine release. Published engine-qualified release tags are never intentionally reassigned to different image content during ordinary release operations, and `BuildAndPushDocfxImage.ps1 -Publish` refuses to overwrite existing engine-qualified tags. Because these tags stay fixed to one release, they do not automatically receive future patches or security updates; adopt a newer `-v<EngineVersion>` release explicitly.
@@ -147,7 +148,7 @@ From the repository root, use PowerShell 7 and Docker Buildx in Linux-container 
 pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -Tag docfx-local
 ```
 
-Without `-EngineVersion`, the default loads one platform into Docker and tags it with the existing convenience tags (`docfx-local:2.81.0`, `docfx-local:2.81`, `docfx-local:2`, and `docfx-local:latest`). Pass `-EngineVersion` to also generate the engine-qualified tags and set `org.opencontainers.image.version` locally:
+Without `-EngineVersion`, the default loads one platform into Docker and tags it with the versioned convenience tags (`docfx-local:2.81.0`, `docfx-local:2.81`, and `docfx-local:2`). Pass `-EngineVersion` to also generate the engine-qualified tags and set `org.opencontainers.image.version` locally:
 
 ```powershell
 pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -Tag docfx-local -EngineVersion 1.1.0
@@ -192,7 +193,7 @@ Pull request (.github/workflows/pr.yml)
     -> Create draft GitHub Release with durable split OCI assets & checksums, then clean transient CI artifacts
     -> Human approves and publishes the GitHub Release (.github/workflows/deploy.yml)
     -> Reconstruct & re-verify durable OCI assets, then promote to Docker Hub via Skopeo (--all --preserve-digests)
-    -> Verify all seven tags resolve to the exact multi-platform OCI index digest & re-verify downloaded registry content
+    -> Verify all six tags resolve to the exact multi-platform OCI index digest & re-verify downloaded registry content
 ```
 
 ### Workflow segregation
@@ -209,7 +210,7 @@ Pull request (.github/workflows/pr.yml)
 - **Release tag convention:** Git tags use `vMAJOR.MINOR.PATCH` (for example, `v1.1.0`), which defines Codebelt engine version `1.1.0`. The upstream DocFX CLI version (`2.81.0`) is maintained independently in `Dockerfile` (`ARG DOCFX_VERSION`).
 - **Single implementation:** Local builds (`BuildAndPushDocfxImage.ps1`), CI container validation, release assembly, and deployment promotion all share [`tools/DocfxImage.psm1`](tools/DocfxImage.psm1) and [`tools/OciArtifact.cs`](tools/OciArtifact.cs) (a `.NET 10` file-based C# application).
 - **Direct-publish safeguard:** `BuildAndPushDocfxImage.ps1 -Publish` intentionally refuses direct `docker buildx build --push` against the official `codebeltnet/docfx` (or `docker.io/codebeltnet/docfx`) repository so production releases cannot bypass build-once native verification and release approval. Custom or fork registries (for example, `-ContainerRegistry localhost:5000/team/`) remain supported for local/fork workflows.
-- **Two-phase promotion & conflict protection:** `deploy.yml` preflights all engine-qualified tags (`2.81.0-v1.1.0`, `2.81-v1.1.0`, `2-v1.1.0`) before any registry write. Missing tags are uploaded; tags already pointing to the exact expected OCI index digest are accepted for idempotent retry; any tag pointing to different content fails closed without overwriting. Floating convenience tags (`2.81.0`, `2.81`, `2`, `latest`) are updated only after all engine-qualified tags exist in the registry with the exact expected digest and after re-confirming the release is still the latest published stable release.
+- **Two-phase promotion & conflict protection:** `deploy.yml` preflights all engine-qualified tags (`2.81.0-v1.1.0`, `2.81-v1.1.0`, `2-v1.1.0`) before any registry write. Missing tags are uploaded; tags already pointing to the exact expected OCI index digest are accepted for idempotent retry; any tag pointing to different content fails closed without overwriting. Floating convenience tags (`2.81.0`, `2.81`, `2`) are updated only after all engine-qualified tags exist in the registry with the exact expected digest and after re-confirming the release is still the latest published stable release.
 - **Post-publish verification:** After promotion, `deploy.yml` inspects every promoted tag's raw manifest digest to prove no manifest rewriting occurred, then downloads the image by immutable digest (`codebeltnet/docfx@sha256:<index-digest>`) and re-verifies all blobs, both platforms, OCI labels, SPDX SBOM, and SLSA provenance.
 
 ### Deployment recovery procedure
@@ -219,7 +220,7 @@ To resume or recover a partially completed production deployment of the latest p
 1. Never rebuild the image or re-tag a release for recovery.
 2. In GitHub Actions, manually dispatch **Deploy Docker Hub images** (`.github/workflows/deploy.yml`) from branch `main` with `tag` set to the already-published latest release tag (for example, `v1.1.0`).
 3. `deploy.yml` loads deployment tooling from `main` (pinned to a single `deployment-sha`), downloads the original durable OCI assets from the GitHub Release, re-verifies checksums, the authoritative `release.yml` run, native results, and OCI attestations, skips any engine-qualified tag already matching the exact expected index digest, and completes the remaining promotions idempotently.
-4. Attempting to dispatch recovery from a non-`main` branch, for a draft/prerelease, or for an older superseded release is automatically rejected to prevent rolling back floating convenience tags (`latest`, `2`, `2.81`, `2.81.0`).
+4. Attempting to dispatch recovery from a non-`main` branch, for a draft/prerelease, or for an older superseded release is automatically rejected to prevent rolling back floating convenience tags (`2`, `2.81`, `2.81.0`).
 
 ### Manual GitHub & Docker Hub administrative configuration
 

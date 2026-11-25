@@ -6,20 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [1.1.0] - 2026-11-25
 
-This is a minor release that introduces native multi-framework views generation, adds framework-aware selection and search routing to the `ms-style` template, and updates the builder image and publishing script for multi-platform .NET 10/11 and PowerShell 7 support.
+This is a minor release that introduces native multi-framework views generation, adds framework-aware selection and search routing to the `ms-style` template, introduces Codebelt engine-aware Docker image versioning with OCI metadata traceability, and updates the builder image and publishing script for multi-platform .NET 10/11 and PowerShell 7 support.
 
 ### Added
 
 - Added the native multi-framework views generator (`framework-views/Build-DocfxFrameworkViews.ps1`, `FrameworkViewConventions.ps1`, `DocfxMetadata.ps1`, `Resolve-DocfxProjects.cs`, and `KeepCrossTargetReferences.targets`) with `.docfx/docfx.json` and `.bot/docfx` defaults, `metadata.dest`-derived API roots, MSBuild-evaluated framework precedence, ownership-tracked output reuse, metadata caching, and cross-target project reference recovery,
 - Added `framework-views/framework-views.nginx.conf` and `framework-views/framework-views.Dockerfile` to route per-framework API pages, xref maps, and search indexes by `?view=` query parameter in a pinned NGINX site image,
 - Added framework-view support to the `ms-style` template (`framework-view.js`, `framework-views.compat`, `_master.tmpl`, and `ms-style.css`) with a TOC framework selector, xref-based view fallback, and view-aware search result URLs,
-- Added the `tests/framework-view/` test suite covering Pester unit tests (`FrameworkViewConventions.Tests.ps1`, `DocfxMetadata.Tests.ps1`), synthetic and Cuemon fixture integration tests, and Playwright browser tests (`@playwright/test` 1.65.1).
+- Added Codebelt engine-aware Docker image versioning (`-EngineVersion`) producing engine-qualified `-v{EngineVersion}` tags (`2-v1.1.0`, `2.81-v1.1.0`, `2.81.0-v1.1.0`) alongside the preserved floating convenience tags (`latest`, `2`, `2.81`, `2.81.0`) on a single multi-platform image index, with strict Semantic Versioning and Docker tag validation, prerelease tag isolation, preflight conflict checks refusing reassignment of published engine-qualified tags, and OCI image metadata labels (`org.opencontainers.image.*`, `net.codebelt.docfx.engine.version`, and `net.codebelt.docfx.cli.version`),
+- Added the `tests/BuildAndPushDocfxImage.Tests.ps1` Pester unit test suite with 100% coverage of `BuildAndPushDocfxImage.ps1` and the `tests/framework-view/` test suite covering Pester unit tests (`Build-DocfxFrameworkViews.Tests.ps1`, `FrameworkViewConventions.Tests.ps1`, `DocfxMetadata.Tests.ps1`), synthetic and Cuemon fixture integration tests, and Playwright browser tests (`@playwright/test` 1.65.1).
 
 ### Changed
 
-- Updated `Dockerfile` to base the final builder image on .NET 11 SDK images (`FRAMEWORK_SDK_IMAGE` on `linux/amd64` and `FRAMEWORK_SDK_ARM64_IMAGE` on `linux/arm64`) with PowerShell 7, matching `dotnet-sdk` libc per `TARGETARCH`, and `/opt/docfx/framework-views` included,
-- Updated `BuildAndPushDocfxImage.ps1` for PowerShell 7 with `-Publish`, `-FrameworkSdkImage`, and `-FrameworkSdkArm64Image` parameters, single-platform local `--load` builds by default, and multi-platform (`linux/arm64`, `linux/amd64`) `--push` publishing with `buildx imagetools inspect` digest and platform verification,
-- Updated `README.md` and `templates/ms-style/README.md` with framework-views setup, local and published builder image workflows, and `ms-style` framework-view documentation.
+- Updated `Dockerfile` to base the final builder image on .NET 11 SDK images (`FRAMEWORK_SDK_IMAGE` on `linux/amd64` and `FRAMEWORK_SDK_ARM64_IMAGE` on `linux/arm64`) with PowerShell 7, matching `dotnet-sdk` libc per `TARGETARCH`, `/opt/docfx/framework-views` included, and standard OCI and `net.codebelt.docfx.cli.version` image labels,
+- Updated `BuildAndPushDocfxImage.ps1` for PowerShell 7 with `-EngineVersion`, `-Publish`, `-FrameworkSdkImage`, and `-FrameworkSdkArm64Image` parameters, single-platform local `--load` builds by default, and multi-platform (`linux/arm64`, `linux/amd64`) `--push` publishing with preflight release-tag conflict checks and `buildx imagetools inspect` index digest, platform, and OCI label verification,
+- Updated `README.md`, `framework-views/README.md`, `templates/ms-style/README.md`, and `tests/framework-view/README.md` with Docker image versioning contracts, consumer control trade-offs, framework-views setup, local and published builder image workflows, and verification instructions.
 
 ## [1.0.1] - 2026-09-27
 

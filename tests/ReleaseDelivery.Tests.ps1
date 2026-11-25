@@ -23,10 +23,9 @@ BeforeAll {
         'codebeltnet/docfx:2.81.0'
         'codebeltnet/docfx:2.81'
         'codebeltnet/docfx:2'
-        'codebeltnet/docfx:latest'
     )
     $validEngineTags = $validTags[0..2]
-    $validConvenienceTags = $validTags[3..6]
+    $validConvenienceTags = $validTags[3..5]
 }
 
 AfterAll {
@@ -112,8 +111,9 @@ Describe 'DocfxImage shared module contracts and OCI promotion safeguards' {
 
         It 'invokes Skopeo natively and via utility container fallback with auth mount and error propagation' {
             Mock -ModuleName DocfxImage Test-SkopeoTransport { $true }
-            Mock -ModuleName DocfxImage skopeo { $global:LASTEXITCODE = 0 }
-            { Invoke-Skopeo -Arguments @('copy', 'oci:/tmp/x', 'docker://reg/img:1') } | Should -Not -Throw
+            Mock -ModuleName DocfxImage skopeo { $global:LASTEXITCODE = 0; 'Getting image source signatures'; 'Writing manifest to image destination' }
+            $nativeOut = Invoke-Skopeo -Arguments @('copy', 'oci:/tmp/x', 'docker://reg/img:1')
+            $nativeOut | Should -BeNullOrEmpty
 
             Mock -ModuleName DocfxImage skopeo { $global:LASTEXITCODE = 7 }
             { Invoke-Skopeo -Arguments @('copy', 'oci:/tmp/x', 'docker://reg/img:1') } | Should -Throw '*exited with code 7*'
@@ -141,7 +141,8 @@ Describe 'DocfxImage shared module contracts and OCI promotion safeguards' {
                 }
 
                 $tarFile = Join-Path $TestDrive 'sample.tar'
-                Invoke-Skopeo -Arguments @('copy', "oci-archive:$tarFile", "docker-archive:${tarFile}:local:tag")
+                $fallbackOut = Invoke-Skopeo -Arguments @('copy', "oci-archive:$tarFile", "docker-archive:${tarFile}:local:tag")
+                $fallbackOut | Should -BeNullOrEmpty
                 ($global:DocfxCapturedDockerArgs -join ' ') | Should -BeLike '*REGISTRY_AUTH_FILE=/auth.json*quay.io/skopeo/stable:v1.20.0*'
 
                 $rawBytes = Invoke-Skopeo -Arguments @('inspect', '--raw', 'docker://reg/img:1') -CaptureOutput
@@ -285,11 +286,12 @@ Describe 'DocfxImage shared module contracts and OCI promotion safeguards' {
                 if ($Arguments[0] -ceq 'inspect') { return $s.RawIndexBytes }
                 if ($Arguments[3].StartsWith('docker://')) {
                     $s.Events.Add("verify-download:$($Arguments[3])")
-                    return
+                    return 'Writing manifest to image destination'
                 }
                 $dest = $Arguments[-1].Substring('docker://'.Length)
                 $s.Registry[$dest] = $s.ComputedDigest
                 $s.Events.Add("push:$dest")
+                return 'Getting image source signatures'
             }
 
             $summaryPath = Join-Path $TestDrive 'summary.md'
@@ -305,12 +307,13 @@ Describe 'DocfxImage shared module contracts and OCI promotion safeguards' {
                     -EngineQualifiedTags $engineTags `
                     -ExpectedIndexDigest $global:DocfxPromoState.ComputedDigest `
                     -Platform 'amd64' `
-                    -BeforeConvenience { $global:DocfxPromoState.Events.Add('before-convenience') }
+                    -BeforeConvenience { $global:DocfxPromoState.Events.Add('before-convenience'); 'verified-latest' }
             } finally {
                 $env:GITHUB_STEP_SUMMARY = $prevSummary
             }
 
-            $result.Published.Count | Should -Be 7
+            $result | Should -BeOfType [pscustomobject]
+            $result.Published.Count | Should -Be 6
             $global:DocfxPromoState.Events | Should -Be @(
                 "push:${Repository}:2.81-v1.1.0"
                 "push:${Repository}:2-v1.1.0"
@@ -318,7 +321,6 @@ Describe 'DocfxImage shared module contracts and OCI promotion safeguards' {
                 "push:${Repository}:2.81.0"
                 "push:${Repository}:2.81"
                 "push:${Repository}:2"
-                "push:${Repository}:latest"
                 "verify-download:docker://$Repository@$($global:DocfxPromoState.ComputedDigest)"
             )
             Test-Path -LiteralPath "$($global:DocfxPromoState.ArchiveFile).published.json" | Should -BeTrue
@@ -795,17 +797,20 @@ Describe 'Invoke-DocfxRelease CI/CD lifecycle orchestration' {
                 return (@{ indexDigest = 'sha256:' + ('1' * 64); platforms = @('amd64', 'arm64') } | ConvertTo-Json -Compress)
             }
             Mock Publish-DocfxOciArchive {
-                param([scriptblock] $BeforeConvenience)
+                param([string[]] $Tags, [string[]] $EngineQualifiedTags, [scriptblock] $BeforeConvenience)
                 if ($BeforeConvenience) { & $BeforeConvenience }
                 [pscustomobject]@{
                     IndexDigest = 'sha256:' + ('1' * 64)
                     Repository  = 'codebeltnet/docfx'
-                    Published   = @('1','2','3','4','5','6','7' | ForEach-Object { @{ tag = "t$_"; digest = 'sha256:' + ('1' * 64) } })
+                    Published   = @($Tags | ForEach-Object { @{ tag = $_; digest = 'sha256:' + ('1' * 64) } })
                 }
             }
 
             $pubOut = & $releaseScript -Command Publish -ResolvedDir $script:resolvedDir -OutDir $script:outDir
-            $pubOut | Should -BeLike "*Promoted 7 tags to codebeltnet/docfx@$validIndexDigest*"
+            $pubOut | Should -BeLike "*Promoted 6 tags to codebeltnet/docfx@$validIndexDigest*"
+            Should -Invoke Publish-DocfxOciArchive -Times 1 -Exactly -ParameterFilter {
+                $Tags.Count -eq 6 -and ($Tags -notcontains 'codebeltnet/docfx:latest') -and $EngineQualifiedTags.Count -eq 3
+            }
 
             { & $releaseScript -Command Publish -ResolvedDir (Join-Path $script:work 'no-resolved') -OutDir $script:outDir } | Should -Throw '*identity file is missing*'
 

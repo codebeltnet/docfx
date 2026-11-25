@@ -86,7 +86,7 @@ Describe 'BuildAndPushDocfxImage versioning, OCI build-only, and safeguards' {
                 return (@(@{ Id = 'sha256:' + ('7' * 64); Size = 123456 }) | ConvertTo-Json -Depth 4)
             }
             if ($callArgs.Count -ge 1 -and ($callArgs[0] -ceq 'load' -or $callArgs[0] -ceq 'tag')) {
-                return
+                return 'Loaded image: docfx-verify:test'
             }
             if ($callArgs.Count -ge 2 -and $callArgs[0] -ceq 'buildx' -and $callArgs[1] -ceq 'build') {
                 if ($ds.BuildExitCode -ne 0) {
@@ -109,7 +109,7 @@ Describe 'BuildAndPushDocfxImage versioning, OCI build-only, and safeguards' {
                         ConvertTo-Json |
                         Set-Content -LiteralPath $metadataPath
                 }
-                return
+                return '#1 building with default instance'
             }
             if ($callArgs.Count -ge 3 -and $callArgs[0] -ceq 'buildx' -and $callArgs[1] -ceq 'imagetools' -and $callArgs[2] -ceq 'inspect') {
                 $formatIndex = [Array]::IndexOf($callArgs, '--format')
@@ -177,14 +177,15 @@ Describe 'BuildAndPushDocfxImage versioning, OCI build-only, and safeguards' {
                 'codebeltnet/docfx:2.81.0'
                 'codebeltnet/docfx:2.81'
                 'codebeltnet/docfx:2'
-                'codebeltnet/docfx:latest'
             )
+            $plan.Tags | Should -HaveCount 6
+            $plan.Tags | Should -Not -Contain 'codebeltnet/docfx:latest'
 
             $silent = & $buildScript -Tag docfx-local -WhatIf
             $silent | Should -BeNullOrEmpty
         }
 
-        It 'preserves existing convenience tags when EngineVersion is omitted locally' {
+        It 'generates versioned convenience tags without latest when EngineVersion is omitted locally' {
             $plan = & $buildScript -Tag docfx-local -PassThru
 
             $global:DocfxBuildTestState.DockerCalls.Count | Should -Be 1
@@ -192,7 +193,8 @@ Describe 'BuildAndPushDocfxImage versioning, OCI build-only, and safeguards' {
             $tags = Get-ArgumentValues $buildArgs '--tag'
             $labels = Get-ArgumentValues $buildArgs '--label'
 
-            $tags | Should -Be @('docfx-local:2.81.0', 'docfx-local:2.81', 'docfx-local:2', 'docfx-local:latest')
+            $tags | Should -Be @('docfx-local:2.81.0', 'docfx-local:2.81', 'docfx-local:2')
+            $tags | Should -Not -Contain 'docfx-local:latest'
             $buildArgs | Should -Contain '--load'
             $buildArgs | Should -Not -Contain '--push'
             $labels | Should -Contain 'net.codebelt.docfx.cli.version=2.81.0'
@@ -202,7 +204,7 @@ Describe 'BuildAndPushDocfxImage versioning, OCI build-only, and safeguards' {
             $plan.EngineVersion | Should -BeNullOrEmpty
         }
 
-        It 'builds all seven convenience and engine-qualified tags locally when EngineVersion is supplied' {
+        It 'builds all six convenience and engine-qualified tags locally when EngineVersion is supplied' {
             & $buildScript -Tag docfx-local -EngineVersion 1.1.0 -Platform linux/amd64 `
                 -FrameworkSdkImage 'example.invalid/sdk:11-amd64' `
                 -FrameworkSdkArm64Image 'example.invalid/sdk:11-arm64'
@@ -220,7 +222,6 @@ Describe 'BuildAndPushDocfxImage versioning, OCI build-only, and safeguards' {
                 'docfx-local:2.81.0'
                 'docfx-local:2.81'
                 'docfx-local:2'
-                'docfx-local:latest'
             )
             $labels | Should -Contain 'org.opencontainers.image.version=1.1.0'
             $labels | Should -Contain 'net.codebelt.docfx.engine.version=1.1.0'
@@ -263,6 +264,7 @@ Describe 'BuildAndPushDocfxImage versioning, OCI build-only, and safeguards' {
                 if ($Arguments[-1] -match '^docker-archive:(.+\.tar):') {
                     Set-Content -LiteralPath $Matches[1] -Value 'docker-tar'
                 }
+                return 'Getting image source signatures'
             }
             Mock Invoke-OciArtifact {
                 param([string[]] $Arguments)
@@ -285,6 +287,20 @@ Describe 'BuildAndPushDocfxImage versioning, OCI build-only, and safeguards' {
             $record.Platform | Should -Be 'linux/amd64'
             $record.ConfigDigest | Should -Be ('sha256:' + ('5' * 64))
             $record.NativeVerified | Should -BeFalse
+            $record.Tags | Should -Be @(
+                'codebeltnet/docfx:2.81.0-v1.1.0'
+                'codebeltnet/docfx:2.81-v1.1.0'
+                'codebeltnet/docfx:2-v1.1.0'
+                'codebeltnet/docfx:2.81.0'
+                'codebeltnet/docfx:2.81'
+                'codebeltnet/docfx:2'
+            )
+            $record.ConvenienceTags | Should -Be @(
+                'codebeltnet/docfx:2.81.0'
+                'codebeltnet/docfx:2.81'
+                'codebeltnet/docfx:2'
+            )
+            $record.Tags | Should -Not -Contain 'codebeltnet/docfx:latest'
             Test-Path -LiteralPath $metadataPath | Should -BeTrue
             $global:DocfxBuildTestState.SkopeoCalls.Count | Should -Be 1
             $global:DocfxBuildTestState.OciCalls.Count | Should -Be 2
@@ -332,13 +348,13 @@ Describe 'BuildAndPushDocfxImage versioning, OCI build-only, and safeguards' {
                 CaseName = 'engine patch bump with same CLI'
                 Docfx    = '2.81.0'
                 Engine   = '1.1.1'
-                Expected = @('docfx:2.81.0-v1.1.1', 'docfx:2.81-v1.1.1', 'docfx:2-v1.1.1', 'docfx:2.81.0', 'docfx:2.81', 'docfx:2', 'docfx:latest')
+                Expected = @('docfx:2.81.0-v1.1.1', 'docfx:2.81-v1.1.1', 'docfx:2-v1.1.1', 'docfx:2.81.0', 'docfx:2.81', 'docfx:2')
             }
             @{
                 CaseName = 'future major CLI and engine versions'
                 Docfx    = '3.0.0'
                 Engine   = '2.0.0'
-                Expected = @('docfx:3.0.0-v2.0.0', 'docfx:3.0-v2.0.0', 'docfx:3-v2.0.0', 'docfx:3.0.0', 'docfx:3.0', 'docfx:3', 'docfx:latest')
+                Expected = @('docfx:3.0.0-v2.0.0', 'docfx:3.0-v2.0.0', 'docfx:3-v2.0.0', 'docfx:3.0.0', 'docfx:3.0', 'docfx:3')
             }
             @{
                 CaseName = 'prerelease engine does not move floating convenience tags'
@@ -453,9 +469,20 @@ Describe 'BuildAndPushDocfxImage versioning, OCI build-only, and safeguards' {
                 Should -Throw '*Could not verify whether engine-qualified tag*unauthorized*'
         }
 
-        It 'publishes once to a custom registry, checks all seven tags, verifies both platforms and OCI labels' {
+        It 'publishes once to a custom registry, checks all six tags, verifies both platforms and OCI labels' {
             $output = & $buildScript -ContainerRegistry 'localhost:5000/team/' -EngineVersion '1.1.0' -Publish
             $output | Should -BeExactly "localhost:5000/team/docfx:2.81.0-v1.1.0@$validIndexDigest"
+
+            $pushBuildCall = @($global:DocfxBuildTestState.DockerCalls | Where-Object { $_[0] -ceq 'buildx' -and $_[1] -ceq 'build' })[0]
+            $pushedTags = Get-ArgumentValues $pushBuildCall '--tag'
+            $pushedTags | Should -Be @(
+                'localhost:5000/team/docfx:2.81.0-v1.1.0'
+                'localhost:5000/team/docfx:2.81-v1.1.0'
+                'localhost:5000/team/docfx:2-v1.1.0'
+                'localhost:5000/team/docfx:2.81.0'
+                'localhost:5000/team/docfx:2.81'
+                'localhost:5000/team/docfx:2'
+            )
 
             $global:DocfxBuildTestState.DockerState.HasPushed = $false
             $global:DocfxBuildTestState.DockerState.IndexMediaType = 'application/vnd.docker.distribution.manifest.list.v2+json'

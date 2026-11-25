@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Use the same anonymously pullable NGINX image as PR validation.
+  TEST_NGINX_IMAGE: ghcr.io/nginx/nginx-unprivileged:1.31-alpine
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -108,7 +112,10 @@ jobs:
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
           $testArgs = @{}
-          if ($env:TEST_ROUTING -ceq 'true') { $testArgs.TestRouting = $true }
+          if ($env:TEST_ROUTING -ceq 'true') {
+            $testArgs.TestRouting = $true
+            $testArgs.NginxImage = $env:TEST_NGINX_IMAGE
+          }
           ./tests/framework-view/Test-FrameworkViews.ps1 @testArgs
 
   browser-and-routing:
@@ -152,7 +159,7 @@ jobs:
 
       - name: Run packaged generator, NGINX routing, and Playwright browser tests
         shell: pwsh
-        run: ./tests/framework-view/Test-FrameworkView.ps1
+        run: ./tests/framework-view/Test-FrameworkView.ps1 -NginxImage $env:TEST_NGINX_IMAGE
 
   cuemon-acceptance:
     name: Cuemon acceptance scenario
@@ -193,7 +200,7 @@ jobs:
           & git -C $consumer checkout --detach 53875b1bbb778067a0a029b87861efdb0b78a8b5
           if ($LASTEXITCODE -ne 0) { throw 'Unable to checkout pinned Cuemon fixture revision.' }
           ./tests/framework-view/cuemon/Build-CuemonFixture.ps1 -ConsumerRoot $consumer -OutputRoot $output
-          ./tests/framework-view/cuemon/Test-CuemonFrameworkViews.ps1 -Workspace $output
+          ./tests/framework-view/cuemon/Test-CuemonFrameworkViews.ps1 -Workspace $output -NginxImage $env:TEST_NGINX_IMAGE
 
   containers:
     needs: [validate]

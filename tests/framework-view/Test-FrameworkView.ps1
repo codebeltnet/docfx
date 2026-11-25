@@ -30,11 +30,13 @@ function Test-PackagedGenerator {
     '{"sdk":{"version":"11.0.100","rollForward":"latestFeature"}}' | Set-Content -LiteralPath "$fixture/global.json"
     $mount = "type=bind,source=$work,target=/workspace"
 
+    Import-Module "$repo/tools/DocfxImage.psm1"
+    $expectedDocfx = Get-DocfxDefaultVersion -RootPath $repo
     $pwshVersion = docker run --rm $BuilderImage pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
     $docfxVersion = docker run --rm $BuilderImage docfx --version
     $sdk10 = @(docker run --rm --mount $mount -w /workspace/sdk10 $BuilderImage sh -ec 'dotnet --version && dotnet msbuild -nologo -version')
     $sdk11 = docker run --rm --mount $mount -w /workspace/container-fixture $BuilderImage dotnet --version
-    if ($pwshVersion -notmatch '^7\.' -or $docfxVersion -notmatch '^2\.81\.0(?:\+.+)?$' -or
+    if ($pwshVersion -notmatch '^7\.' -or $docfxVersion -notmatch "^$([regex]::Escape($expectedDocfx))(?:\+.+)?$" -or
         $sdk10[0] -notmatch '^10\.' -or $sdk11 -notmatch '^11\.') {
         throw "Unexpected builder toolchain. PowerShell: $pwshVersion. DocFX: $docfxVersion. SDKs: $($sdk10[0]), $sdk11."
     }

@@ -1,0 +1,220 @@
+name: PR Flow
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-validation:
+    name: Workflow syntax and version contracts
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate DocFX version consistency
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Import-Module ./tools/DocfxImage.psm1 -Force
+          $version = Test-DocfxVersionConsistency
+          Write-Host "DocFX version consistency verified: $version"
+
+      - name: Validate GitHub Actions workflow definitions
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -fsSL -o "$ARCHIVE" 'https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz'
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  '"$ARCHIVE" | sha256sum -c -
+          tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint"
+
+  unit-tests:
+    name: Unit tests and coverage (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, runner: ubuntu-26.04 }
+          - { os: windows, runner: windows-2025 }
+    steps:
+      - name: Checkout
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Install Pester 5
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Install-PSResource -Name Pester -Version '5.7.1' -Repository PSGallery -TrustRepository -Scope CurrentUser
+
+      - name: Run unit tests, 100% coverage, and OCI contract suites
+        shell: pwsh
+        run: ./tools/Invoke-UnitTests.ps1 -CoverageOutputDir ./coverage
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-coverage-${{ matrix.os }}-${{ github.run_attempt }}
+          path: coverage/*.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  framework-views:
+    name: Native framework-views regression (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, runner: ubuntu-26.04, testRouting: true }
+          - { os: windows, runner: windows-2025, testRouting: false }
+    steps:
+      - name: Checkout
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Install DocFX CLI
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Import-Module ./tools/DocfxImage.psm1 -Force
+          $docfxVersion = Get-DocfxDefaultVersion
+          & dotnet tool install --global docfx --version $docfxVersion
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install DocFX CLI $docfxVersion." }
+
+      - name: Run native framework-views regression tests
+        shell: pwsh
+        env:
+          TEST_ROUTING: ${{ matrix.testRouting }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $testArgs = @{}
+          if ($env:TEST_ROUTING -ceq 'true') { $testArgs.TestRouting = $true }
+          ./tests/framework-view/Test-FrameworkViews.ps1 @testArgs
+
+  browser-and-routing:
+    name: Browser and HTTP routing regression
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tests/framework-view/package-lock.json
+
+      - name: Install DocFX CLI
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Import-Module ./tools/DocfxImage.psm1 -Force
+          $docfxVersion = Get-DocfxDefaultVersion
+          & dotnet tool install --global docfx --version $docfxVersion
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install DocFX CLI $docfxVersion." }
+
+      - name: Install Playwright and Chromium
+        working-directory: tests/framework-view
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run packaged generator, NGINX routing, and Playwright browser tests
+        shell: pwsh
+        run: ./tests/framework-view/Test-FrameworkView.ps1
+
+  cuemon-acceptance:
+    name: Cuemon acceptance scenario
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Install DocFX CLI
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Import-Module ./tools/DocfxImage.psm1 -Force
+          $docfxVersion = Get-DocfxDefaultVersion
+          & dotnet tool install --global docfx --version $docfxVersion
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install DocFX CLI $docfxVersion." }
+
+      - name: Run pinned Cuemon.Kernel and Cuemon.IO acceptance tests
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $scratch = Join-Path $env:RUNNER_TEMP 'docfx-cuemon-acceptance'
+          $consumer = Join-Path $scratch 'consumer'
+          $output = Join-Path $scratch 'output'
+          & git clone --single-branch --branch v11.0.0/docfx https://github.com/codebeltnet/cuemon.git $consumer
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to clone Cuemon acceptance fixture.' }
+          & git -C $consumer checkout --detach 53875b1bbb778067a0a029b87861efdb0b78a8b5
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to checkout pinned Cuemon fixture revision.' }
+          ./tests/framework-view/cuemon/Build-CuemonFixture.ps1 -ConsumerRoot $consumer -OutputRoot $output
+          ./tests/framework-view/cuemon/Test-CuemonFrameworkViews.ps1 -Workspace $output
+
+  containers:
+    uses: ./.github/workflows/container.yml
+
+  quality:
+    name: Required quality gate
+    if: always()
+    needs: [workflow-validation, unit-tests, framework-views, browser-and-routing, cuemon-acceptance, containers]
+    runs-on: ubuntu-26.04
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'

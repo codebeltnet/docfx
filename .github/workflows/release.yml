@@ -1,0 +1,301 @@
+name: Release Flow
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release tag and contracts
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout tagged commit
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate release tag, revision, and DocFX version consistency
+        shell: pwsh
+        run: ./tools/Invoke-DocfxRelease.ps1 -Command ValidateTag
+
+      - name: Validate GitHub Actions workflow definitions
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -fsSL -o "$ARCHIVE" 'https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz'
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  '"$ARCHIVE" | sha256sum -c -
+          tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint"
+
+  unit-tests:
+    name: Unit tests and coverage (${{ matrix.os }})
+    needs: [validate]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, runner: ubuntu-26.04 }
+          - { os: windows, runner: windows-2025 }
+    steps:
+      - name: Checkout tagged commit
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Install Pester 5
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Install-PSResource -Name Pester -Version '5.7.1' -Repository PSGallery -TrustRepository -Scope CurrentUser
+
+      - name: Run unit tests, 100% coverage, and OCI contract suites
+        shell: pwsh
+        run: ./tools/Invoke-UnitTests.ps1 -CoverageOutputDir ./coverage
+
+  framework-views:
+    name: Native framework-views regression (${{ matrix.os }})
+    needs: [validate]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, runner: ubuntu-26.04, testRouting: true }
+          - { os: windows, runner: windows-2025, testRouting: false }
+    steps:
+      - name: Checkout tagged commit
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Install DocFX CLI
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Import-Module ./tools/DocfxImage.psm1 -Force
+          $docfxVersion = Get-DocfxDefaultVersion
+          & dotnet tool install --global docfx --version $docfxVersion
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install DocFX CLI $docfxVersion." }
+
+      - name: Run native framework-views regression tests
+        shell: pwsh
+        env:
+          TEST_ROUTING: ${{ matrix.testRouting }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $testArgs = @{}
+          if ($env:TEST_ROUTING -ceq 'true') { $testArgs.TestRouting = $true }
+          ./tests/framework-view/Test-FrameworkViews.ps1 @testArgs
+
+  browser-and-routing:
+    name: Browser and HTTP routing regression
+    needs: [validate]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout tagged commit
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tests/framework-view/package-lock.json
+
+      - name: Install DocFX CLI
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Import-Module ./tools/DocfxImage.psm1 -Force
+          $docfxVersion = Get-DocfxDefaultVersion
+          & dotnet tool install --global docfx --version $docfxVersion
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install DocFX CLI $docfxVersion." }
+
+      - name: Install Playwright and Chromium
+        working-directory: tests/framework-view
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run packaged generator, NGINX routing, and Playwright browser tests
+        shell: pwsh
+        run: ./tests/framework-view/Test-FrameworkView.ps1
+
+  cuemon-acceptance:
+    name: Cuemon acceptance scenario
+    needs: [validate]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout tagged commit
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Install DocFX CLI
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Import-Module ./tools/DocfxImage.psm1 -Force
+          $docfxVersion = Get-DocfxDefaultVersion
+          & dotnet tool install --global docfx --version $docfxVersion
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install DocFX CLI $docfxVersion." }
+
+      - name: Run pinned Cuemon.Kernel and Cuemon.IO acceptance tests
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $scratch = Join-Path $env:RUNNER_TEMP 'docfx-cuemon-acceptance'
+          $consumer = Join-Path $scratch 'consumer'
+          $output = Join-Path $scratch 'output'
+          & git clone --single-branch --branch v11.0.0/docfx https://github.com/codebeltnet/cuemon.git $consumer
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to clone Cuemon acceptance fixture.' }
+          & git -C $consumer checkout --detach 53875b1bbb778067a0a029b87861efdb0b78a8b5
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to checkout pinned Cuemon fixture revision.' }
+          ./tests/framework-view/cuemon/Build-CuemonFixture.ps1 -ConsumerRoot $consumer -OutputRoot $output
+          ./tests/framework-view/cuemon/Test-CuemonFrameworkViews.ps1 -Workspace $output
+
+  containers:
+    needs: [validate]
+    uses: ./.github/workflows/container.yml
+
+  assemble:
+    name: Assemble and verify multi-platform OCI index
+    needs: [validate, unit-tests, framework-views, browser-and-routing, cuemon-acceptance, containers]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout tagged commit
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install .NET SDK
+        uses: codebeltnet/install-dotnet@v3
+        with:
+          versionPrecision: patch
+
+      - name: Download verified native OCI artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: container-*
+          path: inputs
+
+      - id: assemble
+        name: Assemble exact native-verified AMD64 and ARM64 OCI index
+        shell: pwsh
+        run: ./tools/Invoke-DocfxRelease.ps1 -Command Assemble
+
+      - id: verify_oci
+        name: Verify assembled OCI archive with Codebelt verifier
+        uses: codebeltnet/oci-artifact-verify@v1
+        with:
+          archive-path: ${{ github.workspace }}/out/docfx.oci.tar
+          checksum-path: ${{ github.workspace }}/out/docfx.oci.tar.sha256
+          version: ${{ steps.assemble.outputs.version }}
+          revision: ${{ github.sha }}
+
+      - name: Confirm verifier digest matches assembled release metadata
+        shell: pwsh
+        env:
+          ASSEMBLED_DIGEST: ${{ steps.assemble.outputs.digest }}
+          VERIFIED_DIGEST: ${{ steps.verify_oci.outputs.digest }}
+        run: |
+          if ($env:ASSEMBLED_DIGEST -cne $env:VERIFIED_DIGEST) {
+              throw "OCI verifier digest '$($env:VERIFIED_DIGEST)' does not match assembled digest '$($env:ASSEMBLED_DIGEST)'."
+          }
+
+      - name: Split release assets below GitHub per-file limit
+        shell: pwsh
+        run: ./tools/Invoke-DocfxRelease.ps1 -Command Split
+
+      - name: Upload durable release asset bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: assets/*
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  release:
+    name: Create draft release
+    needs: [validate, unit-tests, framework-views, browser-and-routing, cuemon-acceptance, containers, assemble]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout tagged commit
+        uses: codebeltnet/git-checkout@v1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download verified release assets
+        uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: release
+
+      - name: Create draft GitHub release with durable OCI assets
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" release/* --verify-tag --draft --generate-notes --title "$RELEASE_TAG"
+
+      - name: Verify durable release assets before cleaning transient CI copies
+        shell: pwsh
+        run: ./tools/Invoke-DocfxRelease.ps1 -Command VerifyDraftAssets -ReleaseDir release
+
+      - name: Remove transient workflow artifacts after durable verification
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq '.artifacts[].id' |
+            while read -r artifact_id; do
+              gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$artifact_id"
+            done

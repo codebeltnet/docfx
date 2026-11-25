@@ -1,8 +1,8 @@
 function Get-ApiPath($Metadata) {
-    if (!$Metadata.Count) { throw 'Configure at least one project metadata group in docfx.json.' }
+    if (!$Metadata) { throw 'Configure at least one project metadata group in docfx.json.' }
     $common = $null
     foreach ($group in $Metadata) {
-        $destination = $group.dest
+        $destination = $group['dest']
         if ($destination -isnot [string] -or $destination -cnotmatch '^[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\z') {
             throw "Invalid metadata.dest '$destination'. Use a relative API directory with forward slashes and URL-safe directory names."
         }

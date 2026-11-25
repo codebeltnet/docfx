@@ -42,13 +42,14 @@ if ($MetadataCache) {
 }
 
 $config = Read-Json $configPath
-$apiPath = Get-ApiPath $config.metadata
-$buildDestination = if ($config.build.dest) { $config.build.dest } elseif ($config.build.output) { $config.build.output } else { '_site' }
+$apiPath = Get-ApiPath $config['metadata']
+$buildSettings = $config['build'] ?? @{}
+$buildDestination = if ($buildSettings['dest']) { $buildSettings['dest'] } elseif ($buildSettings['output']) { $buildSettings['output'] } else { '_site' }
 if ($buildDestination -cnotmatch '^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$' -or $buildDestination -match '(^|/)\.{1,2}(/|$)') {
     throw 'Framework views require a relative DocFX site destination.'
 }
 $supportedDocfx = '2.81.0'
-$docfx = (Get-Command docfx -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+$docfx = Get-Command docfx -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
 if (!$docfx) { throw "Install DocFX $supportedDocfx as a .NET tool and add its executable to PATH." }
 $version = & $docfx --version
 if ($LASTEXITCODE -ne 0 -or !$version) { throw 'Could not determine the installed DocFX version.' }
@@ -57,7 +58,7 @@ if (($version -split '\+', 2)[0] -cne $supportedDocfx) {
     throw "Framework views use DocFX $supportedDocfx for project discovery. Install that CLI version (found '$version')."
 }
 
-$frameworkTemplate = @($config.build.template | Where-Object { $_ -and (Split-Path -Leaf $_) -ceq 'ms-style' })
+$frameworkTemplate = @($buildSettings['template'] | Where-Object { $_ -and (Split-Path -Leaf $_) -ceq 'ms-style' })
 if ($frameworkTemplate.Count -ne 1) { throw 'Configure one ms-style entry in the DocFX build template list.' }
 $templateSource = [IO.Path]::GetFullPath($frameworkTemplate[0], $source)
 if (!(Test-Path -LiteralPath $templateSource)) {
@@ -132,11 +133,11 @@ try {
         $projects = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
         $groups = for ($groupIndex = 0; $groupIndex -lt $config.metadata.Count; $groupIndex++) {
             $group = $config.metadata[$groupIndex]
-            if (!$group.properties) { $group.properties = @{} }
+            if (!$group['properties']) { $group['properties'] = @{} }
             if (!$group.properties.Contains('Configuration')) { $group.properties.Configuration = 'Release' }
             $groupProjects = @(
                 foreach ($mapping in $mappings[$groupIndex]) {
-                    $root = if ($mapping.source) { [IO.Path]::GetFullPath($mapping.source, $source) } else { $source }
+                    $root = if ($mapping['source']) { [IO.Path]::GetFullPath($mapping['source'], $source) } else { $source }
                     foreach ($file in $mapping.files) {
                         if ([IO.Path]::GetExtension($file) -notin '.csproj', '.fsproj', '.vbproj') {
                             throw "Framework views require project inputs. Found '$file' in '$($group.dest)'."
@@ -251,8 +252,8 @@ try {
                 $count = New-DocfxMetadata $metadata $projects $tfm $view $stage $crossTargetReferences $docfx $cacheFile
             }
 
-            $build = ConvertTo-Json $config.build -Depth 100 | ConvertFrom-Json -AsHashtable
-            if (!$build.globalMetadata) { $build.globalMetadata = @{} }
+            $build = ConvertTo-Json $buildSettings -Depth 100 | ConvertFrom-Json -AsHashtable
+            if (!$build['globalMetadata']) { $build['globalMetadata'] = @{} }
             $build.globalMetadata._frameworkApi = $ApiPath
             $build.globalMetadata._frameworkDirectory = $entry.directory
             $build.dest = $buildDestination

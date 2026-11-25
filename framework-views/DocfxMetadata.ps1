@@ -109,10 +109,13 @@ function New-DocfxMetadata($Metadata, $Projects, [string] $Tfm, [string] $View, 
     $metadataArguments = @('metadata', $metadataPath, '--noRestore')
     $directories = @($Metadata | ForEach-Object { "$Stage/$($_.dest)" })
     $missingReference = 'Found project reference without a matching metadata reference'
+    $ansiColor = '\x1b\[[0-9;:]*m'
 
     $exitCode = Invoke-Step $metadataLog $Docfx $metadataArguments -ReturnExitCode
+    # DocFX colorizes CI output. Keep the original log but parse undecorated diagnostics.
+    $metadataOutput = (Get-Content -LiteralPath $metadataLog) -replace $ansiColor
     # DocFX may succeed with incomplete output or fail with duplicate assembly identities.
-    $referenceWarnings = @(Select-String -LiteralPath $metadataLog -Pattern "$missingReference(?::\s*(.+))?")
+    $referenceWarnings = @($metadataOutput | Select-String -Pattern "$missingReference(?::\s*(.+))?")
     if ($referenceWarnings.Count) {
         $missingProjects = @($referenceWarnings | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() })
         if (!(Repair-DocfxProjectReferences $Metadata $Projects $Tfm $Stage $TargetsFile $missingProjects)) {
@@ -122,11 +125,12 @@ function New-DocfxMetadata($Metadata, $Projects, [string] $Tfm, [string] $View, 
         foreach ($directory in $directories) { Clear-StagedMetadata $directory "$directory/.manifest" }
         Write-Json $metadataPath @{ metadata = $Metadata }
         $exitCode = Invoke-Step $metadataLog $Docfx $metadataArguments -ReturnExitCode
-        if (Select-String -LiteralPath $metadataLog -SimpleMatch $missingReference -Quiet) {
+        $metadataOutput = (Get-Content -LiteralPath $metadataLog) -replace $ansiColor
+        if ($metadataOutput | Select-String -SimpleMatch $missingReference -Quiet) {
             throw "DocFX metadata for $View still has unresolved project references after recovery. Check '$metadataLog' and '$Stage/metadata-before-recovery.log'."
         }
     }
-    if ($exitCode -ne 0 -or (Select-String -LiteralPath $metadataLog -Pattern '^error:' -Quiet)) {
+    if ($exitCode -ne 0 -or ($metadataOutput -match '^error:')) {
         throw "DocFX metadata failed for $View. See $metadataLog."
     }
     $fingerprint = Get-MetadataFingerprint $directories

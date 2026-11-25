@@ -14,30 +14,13 @@ $PSNativeCommandUseErrorActionPreference = $false
 . "$PSScriptRoot/FrameworkViewConventions.ps1"
 . "$PSScriptRoot/DocfxMetadata.ps1"
 
-function Invoke-Step([string] $Log, [string] $Command, [string[]] $Arguments) {
+function Invoke-Step([string] $Log, [string] $Command, [string[]] $Arguments, [switch] $ReturnExitCode) {
     & $Command @Arguments *> $Log
+    if ($ReturnExitCode) { return $LASTEXITCODE }
     if ($LASTEXITCODE -ne 0) {
         Get-Content -LiteralPath $Log -Tail 25 | Write-Host
         throw "$Command exited with $LASTEXITCODE. See $Log"
     }
-}
-
-function Write-Json([string] $Path, $Value) {
-    ConvertTo-Json -InputObject $Value -Depth 100 | Set-Content -LiteralPath $Path
-}
-
-function Read-Json([string] $Path) {
-    Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -AsHashtable -NoEnumerate
-}
-
-function Get-MetadataFingerprint([string[]] $Directories) {
-    $entries = foreach ($directory in $Directories) {
-        if (!(Test-Path -LiteralPath "$directory/.manifest" -PathType Leaf)) { return }
-        foreach ($file in Get-ChildItem -LiteralPath $directory -Recurse -File -Force | Where-Object { $_.Extension -eq '.yml' -or $_.Name -eq '.manifest' } | Sort-Object FullName -CaseSensitive) {
-            "$([IO.Path]::GetRelativePath($directory, $file.FullName).Replace('\', '/'))=$((Get-FileHash -LiteralPath $file.FullName).Hash)"
-        }
-    }
-    [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($entries -join "`n"))))
 }
 
 $configPath = (Resolve-Path -LiteralPath $DocfxConfig).Path
@@ -255,6 +238,7 @@ try {
                     Get-ChildItem -LiteralPath "$cache/$($group.dest)" -Force | Copy-Item -Destination $destination -Recurse -Force
                 }
                 Write-Host "Reused metadata for $view."
+                $count = Get-MetadataCount $directories $view
             } else {
                 foreach ($group in $metadata) {
                     foreach ($project in Get-MappedProjectPaths $group) {
@@ -264,43 +248,7 @@ try {
                         }
                     }
                 }
-                $metadataLog = "$stage/metadata.log"
-                & $docfx metadata $metadataPath --noRestore *> $metadataLog
-                $metadataExitCode = $LASTEXITCODE
-                # The workspace can silently drop a missing dependency on clean checkouts.
-                if ((Select-String -LiteralPath $metadataLog -SimpleMatch 'Found project reference without a matching metadata reference' -Quiet) -and
-                    (Repair-CrossTargetReferences $metadata $projects $tfm $stage $crossTargetReferences)) {
-                    Move-Item -LiteralPath $metadataLog -Destination "$stage/metadata-before-recovery.log"
-                    foreach ($directory in $directories) { Clear-StagedMetadata $directory "$directory/.manifest" }
-                    Write-Json $metadataPath @{ metadata = $metadata }
-                    Invoke-Step $metadataLog $docfx @('metadata', $metadataPath, '--noRestore')
-                    $metadataExitCode = 0
-                }
-                if ($metadataExitCode -ne 0 -or (Select-String -LiteralPath $metadataLog -Pattern '^error:' -Quiet)) {
-                    throw "DocFX metadata failed for $view. See $metadataLog."
-                }
-                $fingerprint = Get-MetadataFingerprint $directories
-                if (!$fingerprint) { throw "Incomplete metadata for $view." }
-                if ($cacheFile) {
-                    $temporary = "$work/generated-$tfm"
-                    foreach ($group in $metadata) {
-                        $destination = "$temporary/$($group.dest)"
-                        New-Item -ItemType Directory -Path $destination -Force | Out-Null
-                        Get-ChildItem -LiteralPath "$stage/$($group.dest)" -Recurse -File -Force | Where-Object { $_.Extension -eq '.yml' -or $_.Name -eq '.manifest' } | ForEach-Object {
-                            $output = Join-Path $destination ([IO.Path]::GetRelativePath("$stage/$($group.dest)", $_.FullName))
-                            New-Item -ItemType Directory -Path (Split-Path -Parent $output) -Force | Out-Null
-                            Copy-Item -LiteralPath $_.FullName -Destination $output
-                        }
-                    }
-                    Set-Content -LiteralPath "$temporary/fingerprint" -Value $fingerprint
-                    $archive = "$cacheFile-$([guid]::NewGuid().ToString('N')).tmp"
-                    try {
-                        [IO.Compression.ZipFile]::CreateFromDirectory($temporary, $archive)
-                        [IO.File]::Move($archive, $cacheFile, $true)
-                    } finally {
-                        [IO.File]::Delete($archive)
-                    }
-                }
+                $count = New-DocfxMetadata $metadata $projects $tfm $view $stage $crossTargetReferences $docfx $cacheFile
             }
 
             $build = ConvertTo-Json $config.build -Depth 100 | ConvertFrom-Json -AsHashtable
@@ -316,9 +264,6 @@ try {
             Copy-Item -LiteralPath $templateSource -Destination "$stage/framework-template/ms-style" -Recurse
             Write-Json "$stage/framework-build.json" @{ build = $build }
             Invoke-Step "$stage/build.log" $docfx @('build', "$stage/framework-build.json")
-            $count = 0
-            foreach ($directory in $directories) { $count += (Read-Json "$directory/.manifest").Count }
-            if (!$count) { throw "Empty DocFX metadata for $view." }
             Write-Host "$view rendered $count metadata UIDs"
         }
     } finally {

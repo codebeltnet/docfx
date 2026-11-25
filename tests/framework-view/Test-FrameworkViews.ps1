@@ -201,7 +201,7 @@ if ($TestRouting) {
     Set-Content "$site/_frameworks/$otherDirectory/reference/legacy/index.html" 'other legacy index'
     $mounts = @('--mount', "type=bind,source=$site,target=/usr/share/nginx/html,readonly",
         '--mount', "type=bind,source=$fresh/nginx.conf,target=/etc/nginx/conf.d/default.conf,readonly")
-    & docker run --rm @mounts $NginxImage -t
+    & docker run --rm --entrypoint nginx @mounts $NginxImage -t
     if ($LASTEXITCODE -ne 0) { throw 'Generated NGINX configuration is invalid.' }
     $container = & docker run --rm -d -p 127.0.0.1::8080 @mounts $NginxImage
     if ($LASTEXITCODE -ne 0) { throw 'Could not start NGINX for routing checks.' }

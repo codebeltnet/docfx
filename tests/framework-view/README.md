@@ -6,13 +6,14 @@ Use PowerShell 7 on the host. The native and browser suites also require the .NE
 
 ## Unit tests and coverage
 
-Run with Pester 5. The coverage target covers the framework conventions, output ownership and metadata recovery helpers.
+Run with Pester 5. Measure all three PowerShell implementation files so the report includes the generator entry point. The unit tests exercise preflight checks, framework conventions, output ownership, and metadata recovery and publication with the external commands mocked. The native and packaged suites below exercise real project discovery, MSBuild, DocFX, cache reuse, rendering and packaging.
 
 ```powershell
 $configuration = New-PesterConfiguration
 $configuration.Run.Path = 'tests/framework-view/*.Tests.ps1'
 $configuration.CodeCoverage.Enabled = $true
-$configuration.CodeCoverage.Path = 'framework-views/FrameworkViewConventions.ps1', 'framework-views/DocfxMetadata.ps1'
+$configuration.CodeCoverage.Path = (Get-ChildItem framework-views/*.ps1).FullName
+$configuration.CodeCoverage.OutputPath = Join-Path ([IO.Path]::GetTempPath()) 'docfx-framework-views-unit.xml'
 $configuration.CodeCoverage.CoveragePercentTarget = 100
 Invoke-Pester -Configuration $configuration
 ```
@@ -24,7 +25,7 @@ pwsh -NoProfile -File tests/framework-view/Test-FrameworkViews.ps1 -TestRouting
 pwsh -NoProfile -File tests/framework-view/Test-FrameworkViews.ps1 -ProjectSdk8 -TestRouting
 ```
 
-These exercise glob exclusions, nested metadata destinations, per-view project availability, independently versioned cross-target dependencies, repeat builds, cache reuse, invalidation and isolated recovery. The second command selects .NET 8 for the projects and a modern SDK for the resolver. Without `-TestRouting`, the suite runs without Docker on Windows, Linux or CI.
+These exercise glob exclusions, nested metadata destinations, per-view project availability, full assembly identities, inherited overloads, consumer MSBuild hooks, repeat builds, cache reuse, invalidation and isolated recovery. The second command selects .NET 8 for the projects and a modern SDK for the resolver. Without `-TestRouting`, the suite runs without Docker on Windows, Linux or CI.
 
 ## Packaged builder and browser regression
 

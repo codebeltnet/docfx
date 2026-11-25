@@ -29,6 +29,11 @@ New-Item -ItemType Directory "$root/src/Runtime", "$root/src/Legacy", "$root/src
   </Target>
 </Project>
 '@ | Set-Content -LiteralPath "$root/Directory.Build.targets"
+@'
+<Project>
+  <PropertyGroup><DefineConstants>$(DefineConstants);CONSUMER_HOOK</DefineConstants></PropertyGroup>
+</Project>
+'@ | Set-Content -LiteralPath "$root/Consumer.targets"
 
 if ($ProjectSdk8) {
     Set-Content "$root/global.json" '{"sdk":{"version":"8.0.100","rollForward":"latestFeature"}}'
@@ -54,7 +59,7 @@ Set-Content "$root/src/Runtime/Runtime.csproj" @"
 Set-Content "$root/src/Runtime/Runtime.cs" @"
 namespace FrameworkFixture;
 public class Common : Compatibility.Bridge { }
-#if $constant
+#if $constant && CONSUMER_HOOK
 public class Modern { }
 #endif
 "@
@@ -73,14 +78,15 @@ foreach ($dependency in 'Bridge', 'Model') {
 "@
 }
 Set-Content "$root/dependencies/Bridge/Bridge.cs" 'namespace FrameworkFixture.Compatibility; public class Bridge : Model { }'
-Set-Content "$root/dependencies/Model/Model.cs" 'namespace FrameworkFixture.Compatibility; public class Model { public void InheritedFromModel() { } }'
+Set-Content "$root/dependencies/Model/Model.cs" 'namespace FrameworkFixture.Compatibility; public class Model { public void InheritedFromModel() { } public void InheritedFromModel(int value) { } }'
 Set-Content "$root/src/Legacy/Legacy.csproj" "<Project Sdk=`"Microsoft.NET.Sdk`"><PropertyGroup><TargetFramework>$otherTfm</TargetFramework><LangVersion>latest</LangVersion></PropertyGroup></Project>"
 Set-Content "$root/src/Legacy/Legacy.cs" 'namespace FrameworkFixture.Compatibility; public class Legacy { }'
 Set-Content "$root/src/Excluded/Excluded.csproj" 'This project must be excluded by the DocFX mapping.'
 Set-Content "$docs/index.md" '# Shared concept'
 @{
     metadata = @(
-        @{ src = @(@{ src = '../src'; files = @('**.csproj'); exclude = @('Excluded/**', 'Legacy/**') }); dest = 'reference/runtime' }
+        @{ src = @(@{ src = '../src'; files = @('**.csproj'); exclude = @('Excluded/**', 'Legacy/**') }); dest = 'reference/runtime'
+           properties = @{ CustomAfterMicrosoftCommonTargets = "$root/Consumer.targets" } }
         @{ src = @{ src = '../src'; files = 'Legacy/Legacy.csproj' }; dest = 'reference/legacy' }
     )
     build = @{
@@ -130,19 +136,25 @@ if (($manifest.viewOrder -join ',') -cne "$defaultView,$otherView" -or $manifest
     throw 'The generated manifest does not reflect the inferred API root and framework precedence.'
 }
 foreach ($assembly in @(
-    @{ path = "$root/src/Runtime/bin/Release/$defaultTfm/Runtime.dll"; version = '3.0.0.0' }
-    @{ path = "$root/dependencies/Bridge/bin/Release/netstandard2.0/Bridge.dll"; version = '7.1.0.0' }
-    @{ path = "$root/dependencies/Model/bin/Release/netstandard2.0/Model.dll"; version = '12.2.0.0' }
+    @{ path = "$root/src/Runtime/bin/Release/$defaultTfm/Runtime.dll"; identity = 'Runtime, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null' }
+    @{ path = "$root/dependencies/Bridge/bin/Release/netstandard2.0/Bridge.dll"; identity = 'Bridge, Version=7.1.0.0, Culture=neutral, PublicKeyToken=null' }
+    @{ path = "$root/dependencies/Model/bin/Release/netstandard2.0/Model.dll"; identity = 'Model, Version=12.2.0.0, Culture=neutral, PublicKeyToken=null' }
 )) {
-    if ([Reflection.AssemblyName]::GetAssemblyName($assembly.path).Version -ne [version]$assembly.version) {
+    if ([Reflection.AssemblyName]::GetAssemblyName($assembly.path).FullName -cne $assembly.identity) {
         throw "Cross-target metadata generation changed the assembly identity of '$($assembly.path)'."
     }
 }
 foreach ($directory in $defaultDirectory, $otherDirectory) {
     $metadata = Get-Content -LiteralPath "$fresh/$directory/framework-metadata.json" -Raw | ConvertFrom-Json -AsHashtable
+    $common = "$fresh/$directory/reference/runtime/FrameworkFixture.Common.yml"
     if ($metadata.metadata[0].properties.Contains('AssemblyVersion') -or
-        !(Select-String -LiteralPath "$fresh/$directory/reference/runtime/FrameworkFixture.Common.yml" -SimpleMatch 'FrameworkFixture.Compatibility.Model.InheritedFromModel' -Quiet)) {
+        !(Select-String -LiteralPath $common -Pattern '^\s*- FrameworkFixture\.Compatibility\.Model\.InheritedFromModel$' -Quiet) -or
+        !(Select-String -LiteralPath $common -Pattern '^\s*- FrameworkFixture\.Compatibility\.Model\.InheritedFromModel\(System\.Int32\)$' -Quiet)) {
         throw "Cross-target metadata for '$directory' lost the native dependency identity or inherited API."
+    }
+    if ($metadata.metadata[0].properties.CustomAfterMicrosoftCommonTargets -cne "$root/Consumer.targets" -or
+        (Split-Path -Leaf $metadata.metadata[0].properties.CustomBeforeMicrosoftCommonTargets) -cne 'KeepCrossTargetReferences.targets') {
+        throw "Cross-target recovery for '$directory' did not preserve the consumer's MSBuild hook."
     }
 }
 foreach ($path in 'index.html', 'reference/runtime/FrameworkFixture.Modern.html', "_frameworks/$otherDirectory/reference/legacy/FrameworkFixture.Compatibility.Legacy.html", "_frameworks/$otherDirectory/reference/runtime/FrameworkFixture.Common.html", "_frameworks/$otherDirectory/index.json") {

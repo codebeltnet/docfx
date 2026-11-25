@@ -40,6 +40,9 @@ function Test-PackagedGenerator {
     }
     Write-Host "Packaged tools: PowerShell $pwshVersion, DocFX $docfxVersion, .NET $($sdk10[0]) and $sdk11."
     docker run --rm --mount $mount -w /workspace/container-fixture $BuilderImage pwsh -NoProfile -File /opt/docfx/framework-views/Build-DocfxFrameworkViews.ps1
+    if (Get-ChildItem -LiteralPath $destination -Filter 'build-*.log' -Recurse) {
+        throw 'Ordinary metadata generation ran a recovery compilation.'
+    }
 
     foreach ($project in 'Runtime', 'Utilities') {
         if (!(Test-Path -LiteralPath "$fixture/$project/obj/project.assets.json" -PathType Leaf)) {

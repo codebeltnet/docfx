@@ -398,7 +398,7 @@ function Test-DocfxPromotionPreflight {
         throw 'Promotion destination tags must be unique.'
     }
 
-    $repos = @($Tags | ForEach-Object { ($_ -split ':', 2)[0] } | Select-Object -Unique)
+    $repos = @($Tags -replace ':[^/:]+$' | Select-Object -Unique)
     if ($repos.Count -ne 1) {
         throw 'All promotion destination tags must target one repository.'
     }

@@ -235,6 +235,10 @@ Describe 'DocfxImage shared module contracts and OCI promotion safeguards' {
             { Test-DocfxPromotionPreflight @base -EngineQualifiedTags @() } | Should -Throw '*explicit engine-qualified*'
             { Test-DocfxPromotionPreflight @base -Tags @($validTags[0], $validTags[0]) } | Should -Throw '*must be unique*'
             { Test-DocfxPromotionPreflight @base -Tags @('codebeltnet/docfx:2-v1.1.0', 'other/docfx:2') } | Should -Throw '*target one repository*'
+            $portQualifiedEngineTag = 'localhost:5000/team/docfx:2-v1.1.0'
+            {
+                Test-DocfxPromotionPreflight @base -Tags @($portQualifiedEngineTag, 'localhost:5000/other/docfx:2') -EngineQualifiedTags @($portQualifiedEngineTag)
+            } | Should -Throw '*target one repository*'
             { Test-DocfxPromotionPreflight @base -EngineQualifiedTags @('codebeltnet/docfx:9-v1.1.0') } | Should -Throw '*must be included in destination tags*'
             { Test-DocfxPromotionPreflight @base -Tags @('codebeltnet/docfx:2-v1.0.0') -EngineQualifiedTags @('codebeltnet/docfx:2-v1.0.0') } | Should -Throw '*does not match engine version*'
         }
@@ -262,8 +266,13 @@ Describe 'DocfxImage shared module contracts and OCI promotion safeguards' {
             $res.IndexDigest | Should -Be $global:DocfxPromoState.ComputedDigest
         }
 
-        It 'promotes engine-qualified tags first, runs BeforeConvenience, promotes convenience tags, verifies by digest, and writes summary' {
-            $global:DocfxPromoState.Registry['codebeltnet/docfx:2.81.0-v1.1.0'] = $global:DocfxPromoState.ComputedDigest
+        It 'promotes engine-qualified tags first and verifies <Repository> by digest' -ForEach @(
+            @{ Repository = 'codebeltnet/docfx' }
+            @{ Repository = 'localhost:5000/team/docfx' }
+        ) {
+            $tags = @($validTags | ForEach-Object { $_.Replace('codebeltnet/docfx', $Repository) })
+            $engineTags = $tags[0..2]
+            $global:DocfxPromoState.Registry["${Repository}:2.81.0-v1.1.0"] = $global:DocfxPromoState.ComputedDigest
 
             Mock -ModuleName DocfxImage Get-RegistryManifestDigest {
                 param($Reference)
@@ -275,7 +284,7 @@ Describe 'DocfxImage shared module contracts and OCI promotion safeguards' {
                 $s = $global:DocfxPromoState
                 if ($Arguments[0] -ceq 'inspect') { return $s.RawIndexBytes }
                 if ($Arguments[3].StartsWith('docker://')) {
-                    $s.Events.Add('verify-download')
+                    $s.Events.Add("verify-download:$($Arguments[3])")
                     return
                 }
                 $dest = $Arguments[-1].Substring('docker://'.Length)
@@ -292,8 +301,8 @@ Describe 'DocfxImage shared module contracts and OCI promotion safeguards' {
                     -EngineVersion '1.1.0' `
                     -DocfxVersion '2.81.0' `
                     -Revision $validRevision `
-                    -Tags $validTags `
-                    -EngineQualifiedTags $validEngineTags `
+                    -Tags $tags `
+                    -EngineQualifiedTags $engineTags `
                     -ExpectedIndexDigest $global:DocfxPromoState.ComputedDigest `
                     -Platform 'amd64' `
                     -BeforeConvenience { $global:DocfxPromoState.Events.Add('before-convenience') }
@@ -303,14 +312,14 @@ Describe 'DocfxImage shared module contracts and OCI promotion safeguards' {
 
             $result.Published.Count | Should -Be 7
             $global:DocfxPromoState.Events | Should -Be @(
-                'push:codebeltnet/docfx:2.81-v1.1.0'
-                'push:codebeltnet/docfx:2-v1.1.0'
+                "push:${Repository}:2.81-v1.1.0"
+                "push:${Repository}:2-v1.1.0"
                 'before-convenience'
-                'push:codebeltnet/docfx:2.81.0'
-                'push:codebeltnet/docfx:2.81'
-                'push:codebeltnet/docfx:2'
-                'push:codebeltnet/docfx:latest'
-                'verify-download'
+                "push:${Repository}:2.81.0"
+                "push:${Repository}:2.81"
+                "push:${Repository}:2"
+                "push:${Repository}:latest"
+                "verify-download:docker://$Repository@$($global:DocfxPromoState.ComputedDigest)"
             )
             Test-Path -LiteralPath "$($global:DocfxPromoState.ArchiveFile).published.json" | Should -BeTrue
             (Get-Content -LiteralPath $summaryPath -Raw) | Should -BeLike "*$($global:DocfxPromoState.ComputedDigest)*"

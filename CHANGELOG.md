@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-11-25
+
+This is a minor release that introduces native multi-framework views generation, adds framework-aware selection and search routing to the `ms-style` template, and updates the builder image and publishing script for multi-platform .NET 10/11 and PowerShell 7 support.
+
+### Added
+
+- Added the native multi-framework views generator (`framework-views/Build-DocfxFrameworkViews.ps1`, `FrameworkViewConventions.ps1`, `DocfxMetadata.ps1`, `Resolve-DocfxProjects.cs`, and `KeepCrossTargetReferences.targets`) with `.docfx/docfx.json` and `.bot/docfx` defaults, `metadata.dest`-derived API roots, MSBuild-evaluated framework precedence, ownership-tracked output reuse, metadata caching, and cross-target project reference recovery,
+- Added `framework-views/framework-views.nginx.conf` and `framework-views/framework-views.Dockerfile` to route per-framework API pages, xref maps, and search indexes by `?view=` query parameter in a pinned NGINX site image,
+- Added framework-view support to the `ms-style` template (`framework-view.js`, `framework-views.compat`, `_master.tmpl`, and `ms-style.css`) with a TOC framework selector, xref-based view fallback, and view-aware search result URLs,
+- Added the `tests/framework-view/` test suite covering Pester unit tests (`FrameworkViewConventions.Tests.ps1`, `DocfxMetadata.Tests.ps1`), synthetic and Cuemon fixture integration tests, and Playwright browser tests (`@playwright/test` 1.65.1).
+
+### Changed
+
+- Updated `Dockerfile` to base the final builder image on .NET 11 SDK images (`FRAMEWORK_SDK_IMAGE` on `linux/amd64` and `FRAMEWORK_SDK_ARM64_IMAGE` on `linux/arm64`) with PowerShell 7, matching `dotnet-sdk` libc per `TARGETARCH`, and `/opt/docfx/framework-views` included,
+- Updated `BuildAndPushDocfxImage.ps1` for PowerShell 7 with `-Publish`, `-FrameworkSdkImage`, and `-FrameworkSdkArm64Image` parameters, single-platform local `--load` builds by default, and multi-platform (`linux/arm64`, `linux/amd64`) `--push` publishing with `buildx imagetools inspect` digest and platform verification,
+- Updated `README.md` and `templates/ms-style/README.md` with framework-views setup, local and published builder image workflows, and `ms-style` framework-view documentation.
+
 ## [1.0.1] - 2026-09-27
 
 This is a patch release that upgrades DocFX to 2.81.0.
@@ -75,6 +92,7 @@ This is the initial release of the DocFX builder Docker image.
 - Added a DocFX builder Docker image that includes the default and modern templates,
 - Added support for running the DocFX build process in a container.
 
+[1.1.0]: https://github.com/codebeltnet/docfx/compare/v1.0.1..v1.1.0
 [1.0.1]: https://github.com/codebeltnet/docfx/compare/v1.0.0..v1.0.1
 [1.0.0]: https://github.com/codebeltnet/docfx/compare/v0.1.4..v1.0.0
 [0.1.4]: https://github.com/codebeltnet/docfx/compare/v0.1.3..v0.1.4

@@ -1,8 +1,8 @@
 #requires -Version 7.0
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(ValueFromPipeline)]
-    [string] $DocfxVersion = '2.81.0',
+    [string] $DocfxVersion,
     [Parameter(ValueFromPipeline)]
     [string] $EngineVersion,
     [Parameter(ValueFromPipeline)]
@@ -17,176 +17,233 @@ param(
     [string] $DockerFile = 'Dockerfile',
     [string] $FrameworkSdkImage,
     [string] $FrameworkSdkArm64Image,
-    [switch] $Publish
+    [string] $SourceRepository = 'https://github.com/codebeltnet/docfx',
+    [string] $ArchivePath = './artifacts/docfx.oci.tar',
+    [string] $MetadataFile = './artifacts/docfx-image.json',
+    [switch] $BuildOnly,
+    [switch] $RequireNative,
+    [switch] $SkipContainerTest,
+    [switch] $Publish,
+    [switch] $PassThru
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 
-$semVerPattern = '^(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)(?:-(?<prerelease>(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
-$dockerTagPattern = '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
-$engineSuffixPattern = '-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$'
-$repositoryPattern = '^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]+)?/)?[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*$'
+Import-Module (Join-Path $PSScriptRoot 'tools/DocfxImage.psm1')
 
-function Resolve-SemVer([string] $Value, [string] $Name) {
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        throw "$Name must not be empty. Specify a Semantic Version such as '1.1.0'."
-    }
-    if ($Value.Contains('+')) {
-        throw "Invalid $Name '$Value'. Semantic Versioning build metadata ('+...') is not valid in Docker image tags."
-    }
-    if ($Value -cmatch '^v\d') {
-        throw "Invalid $Name '$Value'. Specify a Semantic Version without a leading 'v' (for example, '$($Value.Substring(1))')."
-    }
-    if ($Value -cnotmatch $semVerPattern) {
-        throw "Invalid $Name '$Value'. Specify a valid Semantic Version (MAJOR.MINOR.PATCH with optional -PRERELEASE)."
-    }
-    [pscustomobject]@{
-        Value        = $Value
-        Major        = $Matches['major']
-        Minor        = $Matches['minor']
-        Patch        = $Matches['patch']
-        Prerelease   = $Matches['prerelease']
-        IsPrerelease = [bool]$Matches['prerelease']
-    }
+if ($BuildOnly -and $Publish) {
+    throw 'Cannot combine -BuildOnly and -Publish. Use -BuildOnly for build-once OCI export and validation.'
 }
 
-function Resolve-ImageTagPlan([pscustomobject] $CliVersion, [pscustomobject] $Engine, [string] $Repository) {
-    $versionedBases = if ($CliVersion.IsPrerelease) {
-        @($CliVersion.Value)
-    } else {
-        @($CliVersion.Value, "$($CliVersion.Major).$($CliVersion.Minor)", $CliVersion.Major)
-    }
-    $convenienceTags = if ($Engine -and $Engine.IsPrerelease) {
-        @()
-    } elseif ($CliVersion.IsPrerelease) {
-        @($CliVersion.Value)
-    } else {
-        @($versionedBases + @('latest'))
-    }
-    $engineQualifiedTags = if ($Engine) {
-        @($versionedBases | ForEach-Object { "$_-v$($Engine.Value)" })
-    } else {
-        @()
-    }
-    foreach ($convenienceTag in $convenienceTags) {
-        if ($convenienceTag -cmatch $engineSuffixPattern) {
-            throw "Convenience tag '$convenienceTag' conflicts with the engine-qualified '-v<EngineVersion>' tag convention."
-        }
-    }
-    $allTags = @($engineQualifiedTags) + @($convenienceTags)
-    foreach ($candidate in $allTags) {
-        if ($candidate.Length -gt 128 -or $candidate -cnotmatch $dockerTagPattern) {
-            throw "Generated Docker tag '$candidate' violates Docker tag constraints (length $($candidate.Length), maximum 128)."
-        }
-    }
-    [pscustomobject]@{
-        ConvenienceTags           = $convenienceTags
-        EngineQualifiedTags       = $engineQualifiedTags
-        AllTags                   = $allTags
-        ConvenienceReferences     = @($convenienceTags | ForEach-Object { "${Repository}:$_" })
-        EngineQualifiedReferences = @($engineQualifiedTags | ForEach-Object { "${Repository}:$_" })
-        AllReferences             = @($allTags | ForEach-Object { "${Repository}:$_" })
-    }
+$resolvedDocfxInput = if ($PSBoundParameters.ContainsKey('DocfxVersion')) {
+    $DocfxVersion
+} else {
+    Get-DocfxDefaultVersion -RootPath $PSScriptRoot
 }
+$cli = Resolve-SemVer $resolvedDocfxInput 'DocfxVersion'
 
-function Invoke-Docker([string[]] $Arguments) {
-    & docker @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "docker $($Arguments -join ' ') exited with code $LASTEXITCODE."
-    }
-}
-
-function Assert-EngineTagAvailable([string] $Reference) {
-    $output = & docker buildx imagetools inspect --format '{{json .Manifest}}' $Reference 2>&1
-    $exitCode = $LASTEXITCODE
-    $text = (@($output) | ForEach-Object { $_.ToString() }) -join "`n"
-    if ($exitCode -eq 0) {
-        $detail = if ($text -cmatch '"digest"\s*:\s*"(sha256:[0-9a-f]{64})"') { " ($($Matches[1]))" } else { '' }
-        throw "Published engine-qualified tag '$Reference' already exists in the registry$detail. Refusing to reassign an existing release tag; increment -EngineVersion for a new release."
-    }
-    if ($text -notmatch '(?i)(?:not found|manifest unknown|name unknown|MANIFEST_UNKNOWN|NAME_UNKNOWN)') {
-        throw "Could not verify whether engine-qualified tag '$Reference' exists in the registry (docker exit code $exitCode): $text"
-    }
-}
-
-function Get-SourceRevision([switch] $Required) {
-    $output = & git -C $PSScriptRoot rev-parse HEAD 2>&1
-    $revision = ((@($output) | ForEach-Object { $_.ToString() }) -join '').Trim()
-    if ($LASTEXITCODE -eq 0 -and $revision -cmatch '^[0-9a-f]{40}$') {
-        return $revision
-    }
-    if ($Required) {
-        throw 'Publishing requires a valid Git source revision (git rev-parse HEAD failed).'
-    }
-}
-
-$cli = Resolve-SemVer $DocfxVersion 'DocfxVersion'
-if ($Publish -and [string]::IsNullOrWhiteSpace($EngineVersion)) {
-    throw "Publishing requires an explicit -EngineVersion (for example, -EngineVersion 1.1.0)."
+if (($Publish -or $BuildOnly) -and [string]::IsNullOrWhiteSpace($EngineVersion)) {
+    $modeName = if ($Publish) { 'Publishing' } else { 'Build-only OCI export' }
+    throw "$modeName requires an explicit -EngineVersion (for example, -EngineVersion 1.1.0)."
 }
 $engine = if ($PSBoundParameters.ContainsKey('EngineVersion') -or $EngineVersion) {
     Resolve-SemVer $EngineVersion 'EngineVersion'
 }
 
-$requiredPlatforms = 'linux/arm64', 'linux/amd64'
-[string[]] $platforms = if ($Platform) { $Platform.Split(',').Trim() } elseif ($Publish) { $requiredPlatforms }
-if ($platforms -and @($platforms -cnotmatch '^linux/(arm64|amd64)(?:/[^/]+)?$').Count) {
+$requiredPlatforms = @('linux/arm64', 'linux/amd64')
+[string[]] $platforms = if ($Platform) {
+    @($Platform.Split(',') | ForEach-Object { $_.Trim() })
+} elseif ($Publish) {
+    $requiredPlatforms
+} elseif ($BuildOnly) {
+    @('linux/' + [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant().Replace('x64', 'amd64'))
+} else {
+    [string[]]@()
+}
+
+if (@($platforms).Count -gt 0 -and @($platforms -cnotmatch '^linux/(arm64|amd64)(?:/[^/]+)?$').Count -gt 0) {
     throw 'Supported builder platforms are linux/amd64 and linux/arm64.'
 }
-$repository = $Tag
+
+$repository = if ($Publish -or $BuildOnly) {
+    if ($ContainerRegistry) { "$($ContainerRegistry.TrimEnd('/'))/$Tag" } else { $Tag }
+} else {
+    $Tag
+}
+
 if ($Publish) {
+    if (Test-IsOfficialDocfxRepository -Repository $repository) {
+        throw "Direct publication to official repository '$repository' is disabled to enforce build-once promotion. Tag a vMAJOR.MINOR.PATCH release to run release.yml and publish the draft GitHub release to trigger deploy.yml."
+    }
     foreach ($required in $requiredPlatforms) {
         if (@($platforms -cmatch "^$required(?:/[^/]+)?$").Count -ne 1) {
             throw "Specify exactly one platform for '$required' when publishing."
         }
     }
-    if ($ContainerRegistry) { $repository = "$($ContainerRegistry.TrimEnd('/'))/$Tag" }
-} elseif ($platforms.Count -gt 1) {
-    throw 'A local build loads one platform. Specify one platform or omit -Platform to use the builder default.'
-}
-if ($repository -cnotmatch $repositoryPattern) {
-    throw "Invalid Docker repository '$repository'. Use lowercase repository segments without tags or whitespace."
+} elseif (@($platforms).Count -gt 1) {
+    throw 'A local or build-only invocation builds one platform at a time. Specify one platform or omit -Platform to use the host default.'
 }
 
-$tagPlan = Resolve-ImageTagPlan $cli $engine $repository
-$revision = Get-SourceRevision -Required:$Publish
-$created = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+$tagPlan = Resolve-DocfxImageTagPlan -CliVersion $cli -Engine $engine -Repository $repository
+$plan = [pscustomobject]@{
+    DocfxVersion        = $cli.Value
+    EngineVersion       = if ($engine) { $engine.Value } else { $null }
+    DotnetVersion       = $DotnetVersion
+    Repository          = $repository
+    SourceRepository    = $SourceRepository
+    DockerFile          = $DockerFile
+    Platforms           = $platforms
+    Tags                = $tagPlan.AllReferences
+    ConvenienceTags     = $tagPlan.ConvenienceReferences
+    EngineQualifiedTags = $tagPlan.EngineQualifiedReferences
+    ArchivePath         = [IO.Path]::GetFullPath($ArchivePath)
+    MetadataFile        = [IO.Path]::GetFullPath($MetadataFile)
+    BuildOnly           = [bool]$BuildOnly
+    Published           = $false
+}
 
-$buildArguments = @(
+$action = if ($Publish) { 'Build and publish Docker image' } elseif ($BuildOnly) { 'Build, export OCI archive, and validate Docker image' } else { 'Build and load local Docker image' }
+if (-not $PSCmdlet.ShouldProcess($tagPlan.AllReferences[0], $action)) {
+    if ($PassThru) { return $plan }
+    return
+}
+
+$revision = Get-DocfxSourceRevision -Required:($Publish -or $BuildOnly) -RootPath $PSScriptRoot
+$labels = Get-DocfxOciLabels -CliVersion $cli -Engine $engine -Revision $revision -SourceRepository $SourceRepository
+
+$buildArguments = [System.Collections.Generic.List[string]]::new()
+$buildArguments.AddRange([string[]]@(
     'buildx', 'build', '--file', $DockerFile
     '--build-arg', "DOCFX_VERSION=$($cli.Value)"
     '--build-arg', "DOTNET_VERSION=$DotnetVersion"
-    if ($FrameworkSdkImage) { '--build-arg'; "FRAMEWORK_SDK_IMAGE=$FrameworkSdkImage" }
-    if ($FrameworkSdkArm64Image) { '--build-arg'; "FRAMEWORK_SDK_ARM64_IMAGE=$FrameworkSdkArm64Image" }
-    '--label', "org.opencontainers.image.created=$created"
-    if ($revision) { '--label'; "org.opencontainers.image.revision=$revision" }
-    if ($engine) {
-        '--label'; "org.opencontainers.image.version=$($engine.Value)"
-        '--label'; "net.codebelt.docfx.engine.version=$($engine.Value)"
-    }
-    '--label', "net.codebelt.docfx.cli.version=$($cli.Value)"
-    if ($platforms) { '--platform'; ($platforms -join ',') }
-    foreach ($reference in $tagPlan.AllReferences) { '--tag'; $reference }
-)
+))
+if ($FrameworkSdkImage) { $buildArguments.AddRange([string[]]@('--build-arg', "FRAMEWORK_SDK_IMAGE=$FrameworkSdkImage")) }
+if ($FrameworkSdkArm64Image) { $buildArguments.AddRange([string[]]@('--build-arg', "FRAMEWORK_SDK_ARM64_IMAGE=$FrameworkSdkArm64Image")) }
+foreach ($labelKey in $labels.Keys) {
+    $buildArguments.AddRange([string[]]@('--label', "$labelKey=$($labels[$labelKey])"))
+}
+if (@($platforms).Count -gt 0) {
+    $buildArguments.AddRange([string[]]@('--platform', ($platforms -join ',')))
+}
 
-if (!$Publish) {
-    Invoke-Docker ($buildArguments + @('--load', '.'))
+if ($BuildOnly) {
+    $targetPlatform = $platforms[0]
+    $cpu = ($targetPlatform -split '/')[1]
+    if ($RequireNative) {
+        Assert-NativeDockerHost -Platform $targetPlatform
+    }
+    $null = Test-SkopeoTransport
+
+    $archiveFullPath = [IO.Path]::GetFullPath($ArchivePath)
+    $metadataFullPath = [IO.Path]::GetFullPath($MetadataFile)
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $archiveFullPath) | Out-Null
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $metadataFullPath) | Out-Null
+
+    $ociArgs = @($buildArguments.ToArray()) + @(
+        '--output', "type=oci,name=$($tagPlan.AllReferences[0]),dest=$archiveFullPath"
+        '--sbom=true'
+        '--provenance=mode=max'
+        '.'
+    )
+    Invoke-DocfxDocker $ociArgs
+
+    $verified = Invoke-OciArtifact -Arguments @(
+        'verify', $archiveFullPath
+        '--version', $engine.Value
+        '--docfx-version', $cli.Value
+        '--revision', $revision
+        '--source', $SourceRepository
+        '--platform', $cpu
+    ) -RootPath $PSScriptRoot | ConvertFrom-Json
+
+    $localImage = "docfx-verify:${cpu}-$([guid]::NewGuid().ToString('N'))"
+    $loadArchive = Join-Path ([IO.Path]::GetTempPath()) "docfx-load-${cpu}-$([guid]::NewGuid().ToString('N')).docker.tar"
+    try {
+        Invoke-Skopeo -Arguments @('copy', '--override-os', 'linux', '--override-arch', $cpu, "oci-archive:$archiveFullPath", "docker-archive:${loadArchive}:${localImage}")
+        Invoke-DocfxDocker @('load', '--input', $loadArchive)
+    } finally {
+        if (Test-Path -LiteralPath $loadArchive) {
+            Remove-Item -LiteralPath $loadArchive -Force
+        }
+    }
+
+    if (-not $SkipContainerTest) {
+        & (Join-Path $PSScriptRoot 'tests/Test-DocfxContainer.ps1') `
+            -Image $localImage `
+            -Platform $targetPlatform `
+            -DocfxVersion $cli.Value `
+            -EngineVersion $engine.Value `
+            -Revision $revision `
+            -SourceRepository $SourceRepository `
+            -RequireNative:$RequireNative
+    }
+
+    $loadedConfigDigest = (Invoke-OciArtifact -Arguments @(
+        'loaded-config', $archiveFullPath
+        '--platform', $cpu
+        '--image', $localImage
+    ) -RootPath $PSScriptRoot).Trim()
+
+    $details = @((Invoke-DocfxDocker @('image', 'inspect', $localImage)) -join "`n" | ConvertFrom-Json)[0]
+
+    foreach ($reference in $tagPlan.AllReferences) {
+        Invoke-DocfxDocker @('tag', $localImage, $reference)
+    }
+
+    $record = [pscustomobject]@{
+        DocfxVersion        = $cli.Value
+        EngineVersion       = $engine.Value
+        DotnetVersion       = $DotnetVersion
+        Repository          = $repository
+        SourceRepository    = $SourceRepository
+        SourceCommit        = $revision
+        Platform            = $targetPlatform
+        Architecture        = $cpu
+        Tags                = $tagPlan.AllReferences
+        ConvenienceTags     = $tagPlan.ConvenienceReferences
+        EngineQualifiedTags = $tagPlan.EngineQualifiedReferences
+        ArchivePath         = $archiveFullPath
+        ArchiveSha256       = $verified.archiveSha256
+        OciArchiveBytes     = (Get-Item -LiteralPath $archiveFullPath).Length
+        ConfigDigest        = $loadedConfigDigest
+        ImageId             = $details.Id
+        SizeBytes           = $details.Size
+        NativeVerified      = (-not $SkipContainerTest)
+        CreatedUtc          = $labels['org.opencontainers.image.created']
+    }
+    $record | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $metadataFullPath -Encoding utf8NoBOM
+
+    if ($PassThru) { return $record }
+    return
+}
+
+foreach ($reference in $tagPlan.AllReferences) {
+    $buildArguments.AddRange([string[]]@('--tag', $reference))
+}
+
+if (-not $Publish) {
+    Invoke-DocfxDocker ($buildArguments.ToArray() + @('--load', '.'))
+    if ($PassThru) { return $plan }
     return
 }
 
 foreach ($reference in $tagPlan.EngineQualifiedReferences) {
-    Assert-EngineTagAvailable $reference
+    Assert-EngineTagAvailableForBuild $reference
 }
 
-$metadataFile = New-TemporaryFile
+$metadataTemp = New-TemporaryFile
 try {
-    Invoke-Docker ($buildArguments + @('--push', '--metadata-file', $metadataFile.FullName, '.'))
-    $digest = (Get-Content -LiteralPath $metadataFile.FullName -Raw | ConvertFrom-Json).'containerimage.digest'
-    if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'Buildx did not report a valid published image digest.' }
+    Invoke-DocfxDocker ($buildArguments.ToArray() + @('--push', '--metadata-file', $metadataTemp.FullName, '.'))
+    $digest = (Get-Content -LiteralPath $metadataTemp.FullName -Raw | ConvertFrom-Json).'containerimage.digest'
+    if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+        throw 'Buildx did not report a valid published image digest.'
+    }
 
+    $index = $null
     foreach ($reference in $tagPlan.AllReferences) {
-        $index = Invoke-Docker @('buildx', 'imagetools', 'inspect', '--format', '{{json .Manifest}}', $reference) |
+        $index = Invoke-DocfxDocker @('buildx', 'imagetools', 'inspect', '--format', '{{json .Manifest}}', $reference) |
             ConvertFrom-Json
         if ($index.digest -cne $digest -or $index.mediaType -cnotin @(
             'application/vnd.oci.image.index.v1+json', 'application/vnd.docker.distribution.manifest.list.v2+json'
@@ -194,6 +251,7 @@ try {
             throw "Published tag '$reference' does not resolve to image index '$digest'."
         }
     }
+
     foreach ($required in $requiredPlatforms) {
         $os, $architecture = $required.Split('/')
         $manifest = @($index.manifests | Where-Object {
@@ -204,12 +262,12 @@ try {
         if ($manifest.Count -ne 1 -or $manifest[0].digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
             throw "Published image index '$digest' does not identify one image manifest for '$required'."
         }
-        $image = Invoke-Docker @('buildx', 'imagetools', 'inspect', '--format', '{{json .Image}}', "$repository@$($manifest[0].digest)") |
+        $image = Invoke-DocfxDocker @('buildx', 'imagetools', 'inspect', '--format', '{{json .Image}}', "$repository@$($manifest[0].digest)") |
             ConvertFrom-Json
         if ($image.os -cne $os -or $image.architecture -cne $architecture) {
             throw "Published image config for '$required' reports '$($image.os)/$($image.architecture)'."
         }
-        $labels = $image.config.Labels
+        $actualLabels = $image.config.Labels
         $expectedLabels = [ordered]@{
             'org.opencontainers.image.version'  = $engine.Value
             'net.codebelt.docfx.engine.version' = $engine.Value
@@ -217,7 +275,7 @@ try {
             'org.opencontainers.image.revision' = $revision
         }
         foreach ($labelName in $expectedLabels.Keys) {
-            $actualValue = if ($labels) { $labels.$labelName }
+            $actualValue = if ($actualLabels) { $actualLabels.$labelName }
             if ($actualValue -cne $expectedLabels[$labelName]) {
                 throw "Published image config for '$required' reports label '$labelName' as '$actualValue' instead of '$($expectedLabels[$labelName])'."
             }
@@ -226,5 +284,5 @@ try {
 
     Write-Output "$($tagPlan.AllReferences[0])@$digest"
 } finally {
-    Remove-Item -LiteralPath $metadataFile.FullName
+    Remove-Item -LiteralPath $metadataTemp.FullName
 }

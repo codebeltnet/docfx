@@ -414,7 +414,8 @@ Describe 'Invoke-DocfxRelease CI/CD lifecycle orchestration' {
             foreach ($cpu in 'amd64', 'arm64') {
                 $dir = Join-Path $script:inputsDir "container-$cpu"
                 New-Item -ItemType Directory -Path $dir -Force | Out-Null
-                Set-Content -LiteralPath (Join-Path $dir "docfx.$cpu.oci.tar") "archive-$cpu"
+                $archivePath = Join-Path $dir "docfx.$cpu.oci.tar"
+                Set-Content -LiteralPath $archivePath "archive-$cpu"
                 $cfg = if ($cpu -ceq 'amd64') { $amd64Config } else { $arm64Config }
                 @{
                     DocfxVersion        = '2.81.0'
@@ -429,7 +430,8 @@ Describe 'Invoke-DocfxRelease CI/CD lifecycle orchestration' {
                     EngineQualifiedTags = $validEngineTags
                     ConfigDigest        = $cfg
                     SizeBytes           = 1000
-                    OciArchiveBytes     = 500
+                    ArchiveSha256       = (Get-FileHash -LiteralPath $archivePath).Hash.ToLowerInvariant()
+                    OciArchiveBytes     = (Get-Item -LiteralPath $archivePath).Length
                     NativeVerified      = $true
                 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $dir 'docfx-image.json')
             }
@@ -440,7 +442,8 @@ Describe 'Invoke-DocfxRelease CI/CD lifecycle orchestration' {
                     'verify' {
                         $cpu = $Arguments[[Array]::IndexOf($Arguments, '--platform') + 1]
                         $cfg = if ($cpu -ceq 'amd64') { 'sha256:' + ('2' * 64) } else { 'sha256:' + ('3' * 64) }
-                        (@{ indexDigest = 'sha256:' + ('1' * 64); archiveSha256 = ('e' * 64); platforms = @($cpu); configs = @{ $cpu = $cfg } } | ConvertTo-Json -Compress)
+                        $hash = (Get-FileHash -LiteralPath $Arguments[1]).Hash.ToLowerInvariant()
+                        (@{ indexDigest = 'sha256:' + ('1' * 64); archiveSha256 = $hash; platforms = @($cpu); configs = @{ $cpu = $cfg } } | ConvertTo-Json -Compress)
                     }
                     'merge' {
                         Set-Content -LiteralPath $Arguments[1] 'merged-oci-tar'
@@ -512,6 +515,19 @@ Describe 'Invoke-DocfxRelease CI/CD lifecycle orchestration' {
 
             $global:DocfxRelTestState.GhMap.Clear()
             { & $releaseScript -Command VerifyDraftAssets -ReleaseDir $script:assetsDir } | Should -Throw '*gh api*exited with code 1*'
+        }
+
+        It 'rejects a native record with a mismatched <Field> before merging' -ForEach @(
+            @{ Field = 'ArchiveSha256'; Value = '0' * 64; Expected = '*arm64*OCI archive SHA-256*' }
+            @{ Field = 'OciArchiveBytes'; Value = 500; Expected = '*arm64*OCI archive size*' }
+        ) {
+            $recordPath = Join-Path $script:inputsDir 'container-arm64/docfx-image.json'
+            $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json -AsHashtable
+            $record[$Field] = $Value
+            $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $recordPath
+
+            { & $releaseScript -Command Assemble -InputsDir $script:inputsDir -OutDir $script:outDir } | Should -Throw $Expected
+            Should -Invoke Invoke-OciArtifact -Times 0 -Exactly -ParameterFilter { $Arguments[0] -eq 'merge' }
         }
 
         It 'rejects assembly failures (missing records, unverified, identity/tag/platform/archive/config mismatches)' {

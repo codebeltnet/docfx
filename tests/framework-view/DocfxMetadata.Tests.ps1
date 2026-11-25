@@ -155,7 +155,7 @@ Describe 'DocFX metadata generation and cache publication' {
                 Write-Json "$stage/api/.manifest" @{ 'Fixture.Common' = 'Complete.yml' }
                 return 0
             } else {
-                Set-Content -LiteralPath $Log @("warning: ${script:missingReference}: $root/dependency.csproj", 'error: error CS1704')
+                Set-Content -LiteralPath $Log @("`e[38;5;11mwarning: ${script:missingReference}: $root/dependency.csproj`e[0m", 'error: error CS1704')
                 Set-Content -LiteralPath "$stage/api/Partial.yml" '### YamlMime:ManagedReference'
                 Write-Json "$stage/api/.manifest" @{ 'Fixture.Common' = 'Partial.yml' }
                 return -1
@@ -163,7 +163,7 @@ Describe 'DocFX metadata generation and cache publication' {
         }
     }
 
-    It 'verifies the retry log and caches only regenerated metadata' {
+    It 'recovers a project path from a colorized warning and caches only regenerated metadata' {
         New-DocfxMetadata @($group) @{} 'net11.0' 'net-11.0' $stage 'recovery.targets' 'docfx' $cache | Should -Be 1
         Should -Invoke Invoke-Step -Exactly 2 -ParameterFilter { $Command -eq 'docfx' -and $Arguments[0] -eq 'metadata' -and $ReturnExitCode }
         Should -Invoke Repair-DocfxProjectReferences -Exactly 1 -ParameterFilter { "$root/dependency.csproj" -cin $MissingProjects }
@@ -213,6 +213,7 @@ Describe 'DocFX metadata generation and cache publication' {
 
     It 'rejects <reason> before publishing an archive' -ForEach @(
         @{ reason = 'a logged error'; exitCode = 0; message = 'error: failed generation'; manifest = $null; expected = '*metadata failed*metadata.log*' }
+        @{ reason = 'a colorized error'; exitCode = 0; message = "`e[38;5;9merror: failed generation`e[0m"; manifest = $null; expected = '*metadata failed*metadata.log*' }
         @{ reason = 'a failed exit code'; exitCode = 1; message = ''; manifest = $null; expected = '*metadata failed*metadata.log*' }
         @{ reason = 'a missing manifest'; exitCode = 0; message = 'warning: missing XML comments'; manifest = $null; expected = '*Incomplete metadata*metadata.log*' }
         @{ reason = 'an empty manifest'; exitCode = 0; message = 'warning: missing XML comments'; manifest = @{}; expected = '*Empty DocFX metadata*net-11.0*' }

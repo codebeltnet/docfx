@@ -222,7 +222,8 @@ if ($TestRouting) {
         foreach ($expected in $responses) {
             $result = Invoke-WebRequest "http://$endpoint$($expected.path)" -SkipHttpErrorCheck -MaximumRedirection 0
             $body = if ($result.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($result.Content) } else { $result.Content }
-            if ($result.StatusCode -ne $expected.status -or ($expected.body -and !$body.Contains($expected.body)) -or
+            $expectedBody = $expected['body']
+            if ($result.StatusCode -ne $expected.status -or ($expectedBody -and !$body.Contains($expectedBody)) -or
                 $result.Headers['Cache-Control'] -notlike '*no-store*' -or $result.Headers['ETag']) {
                 throw "Unexpected routing or caching for '$($expected.path)' (HTTP $($result.StatusCode))."
             }

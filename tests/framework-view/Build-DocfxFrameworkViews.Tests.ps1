@@ -167,6 +167,7 @@ switch ($args[0]) {
     }
 
     It 'supports one evaluated framework, the build output alias and NoRestore' {
+        Set-StrictMode -Version Latest
         $scenario = 'single framework'
         $settings.build.output = 'docs-output'
         ConvertTo-Json $settings -Depth 5 | Set-Content -LiteralPath $config
@@ -174,6 +175,18 @@ switch ($args[0]) {
         Test-Path -LiteralPath "$output/net11/docs-output/api/Library.html" | Should -BeTrue
         Test-Path -LiteralPath "$output/net10" | Should -BeFalse
         Get-Content -LiteralPath "$fixture/dotnet.log" -Raw | Should -Not -Match '(?m)^restore '
+    }
+
+    It 'renders with the default destination and metadata when optional keys are absent under StrictMode' {
+        Set-StrictMode -Version Latest
+        $scenario = 'single framework'
+        & $build -DocfxConfig $config -OutputRoot $output
+
+        Test-Path -LiteralPath "$output/net11/_site/api/Library.html" | Should -BeTrue
+        $metadata = Get-Content -LiteralPath "$output/net11/framework-metadata.json" -Raw | ConvertFrom-Json -AsHashtable
+        $metadata.metadata[0].properties.Configuration | Should -BeExactly 'Release'
+        $render = Get-Content -LiteralPath "$output/net11/framework-build.json" -Raw | ConvertFrom-Json -AsHashtable
+        $render.build.globalMetadata._frameworkDirectory | Should -BeExactly 'net11'
     }
 
     It 'diagnoses <scenario>' -ForEach @(

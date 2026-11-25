@@ -147,7 +147,7 @@ if ($BuildOnly) {
         '--provenance=mode=max'
         '.'
     )
-    Invoke-DocfxDocker $ociArgs
+    Invoke-DocfxDocker $ociArgs | Out-Host
 
     $verified = Invoke-OciArtifact -Arguments @(
         'verify', $archiveFullPath
@@ -161,8 +161,8 @@ if ($BuildOnly) {
     $localImage = "docfx-verify:${cpu}-$([guid]::NewGuid().ToString('N'))"
     $loadArchive = Join-Path ([IO.Path]::GetTempPath()) "docfx-load-${cpu}-$([guid]::NewGuid().ToString('N')).docker.tar"
     try {
-        Invoke-Skopeo -Arguments @('copy', '--override-os', 'linux', '--override-arch', $cpu, "oci-archive:$archiveFullPath", "docker-archive:${loadArchive}:${localImage}")
-        Invoke-DocfxDocker @('load', '--input', $loadArchive)
+        $null = Invoke-Skopeo -Arguments @('copy', '--override-os', 'linux', '--override-arch', $cpu, "oci-archive:$archiveFullPath", "docker-archive:${loadArchive}:${localImage}")
+        Invoke-DocfxDocker @('load', '--input', $loadArchive) | Out-Host
     } finally {
         if (Test-Path -LiteralPath $loadArchive) {
             Remove-Item -LiteralPath $loadArchive -Force
@@ -189,7 +189,7 @@ if ($BuildOnly) {
     $details = @((Invoke-DocfxDocker @('image', 'inspect', $localImage)) -join "`n" | ConvertFrom-Json)[0]
 
     foreach ($reference in $tagPlan.AllReferences) {
-        Invoke-DocfxDocker @('tag', $localImage, $reference)
+        Invoke-DocfxDocker @('tag', $localImage, $reference) | Out-Host
     }
 
     $record = [pscustomobject]@{
@@ -224,7 +224,7 @@ foreach ($reference in $tagPlan.AllReferences) {
 }
 
 if (-not $Publish) {
-    Invoke-DocfxDocker ($buildArguments.ToArray() + @('--load', '.'))
+    Invoke-DocfxDocker ($buildArguments.ToArray() + @('--load', '.')) | Out-Host
     if ($PassThru) { return $plan }
     return
 }
@@ -235,7 +235,7 @@ foreach ($reference in $tagPlan.EngineQualifiedReferences) {
 
 $metadataTemp = New-TemporaryFile
 try {
-    Invoke-DocfxDocker ($buildArguments.ToArray() + @('--push', '--metadata-file', $metadataTemp.FullName, '.'))
+    Invoke-DocfxDocker ($buildArguments.ToArray() + @('--push', '--metadata-file', $metadataTemp.FullName, '.')) | Out-Host
     $digest = (Get-Content -LiteralPath $metadataTemp.FullName -Raw | ConvertFrom-Json).'containerimage.digest'
     if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
         throw 'Buildx did not report a valid published image digest.'

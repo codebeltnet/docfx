@@ -1,0 +1,23 @@
+{
+  "metadata": [
+    {
+      "src": [{ "files": ["Runtime/Runtime.csproj"] }],
+      "dest": "api/runtime",
+      "memberLayout": "separatePages"
+    },
+    {
+      "src": [{ "files": ["Utilities/Utilities.csproj"] }],
+      "dest": "api/utilities",
+      "memberLayout": "separatePages"
+    }
+  ],
+  "build": {
+    "content": [{ "files": ["api/**/*.yml", "index.md", "toc.yml"] }],
+    "globalMetadata": {
+      "_enableSearch": true,
+      "_disableContribution": true
+    },
+    "template": ["default", "modern", "templates/ms-style"],
+    "dest": "_site"
+  }
+}

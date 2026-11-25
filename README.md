@@ -2,7 +2,7 @@
 
 This repository distributes the DocFX builder image, shared templates and native multi-framework documentation generator.
 
-Use [framework views](framework-views/README.md) to generate one native set of API pages, xrefs and search results per target framework. The same PowerShell entry point runs on Windows, Linux, CI and in the builder image. Ordinary DocFX sites continue to use the standard CLI.
+Framework views generate one native set of API pages, xrefs and search results per evaluated project target framework. From the consumer repository root, the generator reads `.docfx/docfx.json` and writes to `.bot/docfx`. The same PowerShell entry point runs on Windows, Linux, CI and in the builder image. Ordinary DocFX sites continue to use the standard CLI. [Framework views setup and migration](framework-views/README.md)
 
 Consuming repositories only need to provide their DocFX metadata and content with a command such as `ADD [".", "docfx"]` in their documentation Dockerfile.
 

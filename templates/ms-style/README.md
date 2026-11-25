@@ -53,7 +53,7 @@ This is the only content-model migration required. Existing DocFX YAML, Markdown
 
 ## Framework views
 
-The opt-in [DocFX framework views generator](../../framework-views/README.md) supplies `_frameworkApi`, `_frameworkDirectory`, and `/framework-views.json`. On API pages, the template puts the framework selector above the TOC and uses the native xref map for each view to find the current API. The selector follows the configured newest-to-oldest order, keeps the reader in the current view when that is the best available choice, and reports which view it displays. Availability refers to published documentation.
+The opt-in [DocFX framework views generator](../../framework-views/README.md) supplies `_frameworkApi`, `_frameworkDirectory`, and `/framework-views.json`. On API pages, the template puts the framework selector above the TOC and uses the native xref map for each view to find the current API. The selector follows the discovered framework precedence, keeps the reader in the current view when that is the best available choice, and reports which view it displays. Availability refers to published documentation.
 
 Each view keeps the public API pathname and uses `?view=` for explicit selection. The query-aware NGINX configuration also exposes the native search index for the selected framework. The template applies public URLs to search destinations and their secondary labels. Without framework build metadata, the template uses the standard DocFX navigation and search.
 

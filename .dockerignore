@@ -1,0 +1,4 @@
+*
+!Dockerfile
+!templates/ms-style/**
+!framework-views/**

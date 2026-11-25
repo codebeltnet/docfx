@@ -87,6 +87,58 @@ For the underlying template model, see:
 - [Custom-template merge guidance](https://dotnet.github.io/docfx/tutorial/howto_create_custom_template.html)
 - [DocFX template CLI reference](https://dotnet.github.io/docfx/reference/docfx-cli-reference/docfx-template.html)
 
+## Docker image versioning
+
+The `codebeltnet/docfx` distribution versions two independent dimensions:
+
+- **DocFX CLI version:** the upstream DocFX CLI and upstream templates packaged in the image (for example, `2.81.0`).
+- **Codebelt engine version:** the Semantic Versioning release of `codebeltnet/docfx` itself, covering the `ms-style` template, multi-framework views generator, MSBuild discovery, metadata recovery, and container packaging (for example, `1.1.0`).
+
+Neither version is inferred from the other. The examples below use DocFX CLI `2.81.0` and Codebelt engine `1.1.0` to illustrate the implemented naming contract; they do not assert that the `1.1.0` tags are publicly available in a registry before release publication occurs.
+
+### Convenience and engine-qualified tags
+
+For a standard stable release containing one upstream DocFX CLI version, a single multi-platform build associates all seven tags with the same published image index:
+
+| Tag family | Image tag | Meaning |
+| --- | --- | --- |
+| Convenience | `codebeltnet/docfx:latest` | Latest published distribution |
+| Convenience | `codebeltnet/docfx:2` | Latest published distribution within DocFX CLI major version `2` |
+| Convenience | `codebeltnet/docfx:2.81` | Latest published distribution within DocFX CLI minor version `2.81` |
+| Convenience | `codebeltnet/docfx:2.81.0` | Distribution using exact DocFX CLI version `2.81.0` |
+| Engine-qualified | `codebeltnet/docfx:2-v1.1.0` | DocFX CLI major version `2` with Codebelt engine `1.1.0` |
+| Engine-qualified | `codebeltnet/docfx:2.81-v1.1.0` | DocFX CLI minor version `2.81` with Codebelt engine `1.1.0` |
+| Engine-qualified | `codebeltnet/docfx:2.81.0-v1.1.0` | Exact DocFX CLI `2.81.0` with Codebelt engine `1.1.0` |
+
+Prerelease versions never update floating stable convenience tags:
+
+- A prerelease Codebelt engine version (for example, `1.2.0-rc.1` with DocFX CLI `2.81.0`) generates only the engine-qualified tags (`2.81.0-v1.2.0-rc.1`, `2.81-v1.2.0-rc.1`, `2-v1.2.0-rc.1`).
+- A prerelease DocFX CLI version (for example, `2.82.0-preview.1` with stable Codebelt engine `1.2.0`) generates only the exact CLI tags (`2.82.0-preview.1-v1.2.0` and `2.82.0-preview.1`), or only `2.82.0-preview.1-v1.2.0-rc.1` when both dimensions are prereleases.
+
+### Consumer control levels
+
+Existing consumers do not need to migrate; unqualified convenience tags remain supported with their established behavior. Choose the reference level that matches your reproducibility needs:
+
+- **Convenience** (for example, `codebeltnet/docfx:2` or `codebeltnet/docfx:2.81.0`): automatically receives updated Codebelt engine releases for that DocFX CLI scope. Convenient for low-maintenance builds, but pulling a newer image can introduce breaking Codebelt engine changes independently of the upstream DocFX CLI.
+- **Explicit version selection** (for example, `codebeltnet/docfx:2-v1.1.0` or `codebeltnet/docfx:2.81.0-v1.1.0`): selects a specific Codebelt engine release. Published engine-qualified release tags are never intentionally reassigned to different image content during ordinary release operations, and `BuildAndPushDocfxImage.ps1 -Publish` refuses to overwrite existing engine-qualified tags. Because these tags stay fixed to one release, they do not automatically receive future patches or security updates; adopt a newer `-v<EngineVersion>` release explicitly.
+- **Immutable reproducibility** (for example, `codebeltnet/docfx:2.81.0-v1.1.0@sha256:<published-image-index-digest>`): Docker tags themselves are mutable pointers by nature. Pinning the published multi-platform image index digest provides content-addressed immutability.
+
+Client-side preflight checks cannot prevent a race condition against concurrent or external registry writers. Where supported by the destination registry, enable selective registry-enforced immutable-tag rules for engine-qualified tags (for example, Docker Hub immutable-tag pattern `^.+-v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`) while keeping convenience tags movable.
+
+### OCI image metadata
+
+Every image built with `Dockerfile` and `BuildAndPushDocfxImage.ps1` records both versioning dimensions and source provenance through OCI labels:
+
+| OCI label | Purpose |
+| --- | --- |
+| `org.opencontainers.image.version` | Codebelt engine version (`-EngineVersion`, set on published releases and local builds that pass `-EngineVersion`) |
+| `net.codebelt.docfx.engine.version` | Explicit Codebelt engine version paired with the CLI version label |
+| `net.codebelt.docfx.cli.version` | Upstream DocFX CLI version packaged in the image |
+| `org.opencontainers.image.revision` | Git commit SHA of the `codebeltnet/docfx` build source |
+| `org.opencontainers.image.created` | RFC 3339 UTC build timestamp |
+| `org.opencontainers.image.source` / `org.opencontainers.image.url` | Canonical repository URL (`https://github.com/codebeltnet/docfx`) |
+| `org.opencontainers.image.title` / `description` / `vendor` / `licenses` | Distribution identity and MIT license metadata |
+
 ## Build the builder image locally
 
 From the repository root, use PowerShell 7 and Docker Buildx in Linux-container mode.
@@ -95,24 +147,43 @@ From the repository root, use PowerShell 7 and Docker Buildx in Linux-container 
 pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -Tag docfx-local
 ```
 
-The default loads one platform into Docker and tags it as `docfx-local:2.81.0`, `docfx-local:2.81`, `docfx-local:2`, and `docfx-local:latest`. Supply `-Platform linux/amd64` or `-Platform linux/arm64` to select a platform explicitly. AMD64 uses Alpine and ARM64 uses Ubuntu 26.04, whose .NET 11 SDK includes PowerShell 7 on ARM64. Use the corresponding package manager when extending either image.
+Without `-EngineVersion`, the default loads one platform into Docker and tags it with the existing convenience tags (`docfx-local:2.81.0`, `docfx-local:2.81`, `docfx-local:2`, and `docfx-local:latest`). Pass `-EngineVersion` to also generate the engine-qualified tags and set `org.opencontainers.image.version` locally:
 
-The script accepts `-DocfxVersion` for the CLI and upstream templates and `-DotnetVersion` for the SDK and runtime used by DocFX. The defaults package DocFX 2.81.0 and the .NET 10 and .NET 11 SDKs. Use `-FrameworkSdkImage` or `-FrameworkSdkArm64Image` to override the final SDK base on the corresponding platform. Keep the base's C library compatible with that platform's SDK stage and ensure the base supplies PowerShell 7. The [framework views compatibility contract](framework-views/README.md#template-compatibility) applies when changing the CLI or template.
+```powershell
+pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -Tag docfx-local -EngineVersion 1.1.0
+docker inspect --format '{{json .Config.Labels}}' docfx-local:2.81.0-v1.1.0
+```
+
+Supply `-Platform linux/amd64` or `-Platform linux/arm64` to select a platform explicitly. AMD64 uses Alpine and ARM64 uses Ubuntu 26.04, whose .NET 11 SDK includes PowerShell 7 on ARM64. Use the corresponding package manager when extending either image.
+
+The script accepts `-DocfxVersion` for the upstream CLI and templates, `-EngineVersion` for the Codebelt engine Semantic Version (without a leading `v` or `+` build metadata), and `-DotnetVersion` for the SDK and runtime used by DocFX. The defaults package DocFX `2.81.0` and the .NET 10 and .NET 11 SDKs. Use `-FrameworkSdkImage` or `-FrameworkSdkArm64Image` to override the final SDK base on the corresponding platform. Keep the base's C library compatible with that platform's SDK stage and ensure the base supplies PowerShell 7. The [framework views compatibility contract](framework-views/README.md#template-compatibility) applies when changing the CLI or template.
+
+To run the builder versioning and publication-safeguard unit tests with Pester 5 and verify 100% coverage of `BuildAndPushDocfxImage.ps1`:
+
+```powershell
+$configuration = New-PesterConfiguration
+$configuration.Run.Path = 'tests/BuildAndPushDocfxImage.Tests.ps1'
+$configuration.CodeCoverage.Enabled = $true
+$configuration.CodeCoverage.Path = 'BuildAndPushDocfxImage.ps1'
+$configuration.CodeCoverage.OutputPath = Join-Path ([IO.Path]::GetTempPath()) 'docfx-image-unit.xml'
+$configuration.CodeCoverage.CoveragePercentTarget = 100
+Invoke-Pester -Configuration $configuration
+```
 
 ## Publish and verify the builder image
 
-For an authorized release, select a Buildx builder that can build `linux/amd64` and `linux/arm64`, using native nodes or emulation. Use `docker buildx inspect --bootstrap` to check the builder's platforms. If needed, create a builder with `docker buildx create --driver docker-container --name docfx-release --use`. Sign in to the destination registry and run the publishing script from the repository root.
+For an authorized release, select a Buildx builder that can build `linux/amd64` and `linux/arm64`, using native nodes or emulation. Use `docker buildx inspect --bootstrap` to check the builder's platforms. If needed, create a builder with `docker buildx create --driver docker-container --name docfx-release --use`. Sign in to the destination registry and run the publishing script from the repository root with an explicit `-EngineVersion`:
 
 ```powershell
-pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -Publish
+pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -EngineVersion 1.1.0 -Publish
 ```
 
-Existing release callers must add `-Publish`. The script sends one multi-platform build directly to the registry under the exact, major/minor, major, and `latest` tags. It verifies that all four tags resolve to the built index digest and fetches both required image configs to verify their platforms. On success it prints `codebeltnet/docfx:2.81.0@sha256:<image-index-digest>`. Use `-ContainerRegistry` and `-Tag` for a different registry namespace or repository.
+Publishing requires both `-Publish` and an explicit `-EngineVersion`, along with a clean Git commit revision (`git rev-parse HEAD`). Before building or pushing, the script inspects every engine-qualified destination tag in the registry and stops if any tag already exists or if the registry check fails unexpectedly. It then performs one multi-platform build (`linux/arm64` and `linux/amd64`) and pushes all applicable tags to the single resulting image index. After pushing, it verifies that every published tag resolves to the built image index digest and inspects both required platform image configs to verify their OS, architecture, and OCI version and revision labels. On success it prints `codebeltnet/docfx:2.81.0-v1.1.0@sha256:<published-image-index-digest>`. Use `-ContainerRegistry` and `-Tag` for a different registry namespace or repository.
 
-Inspect the exact tag to retrieve the digest and platform list after release.
+Inspect the published engine-qualified tag to retrieve the index digest and platform list after release:
 
 ```powershell
-docker buildx imagetools inspect codebeltnet/docfx:2.81.0
+docker buildx imagetools inspect codebeltnet/docfx:2.81.0-v1.1.0
 ```
 
-Use the top-level `Digest` field in `codebeltnet/docfx:2.81.0@sha256:<image-index-digest>`. Record the digest from the approved release alongside the source commit. The version tags can move, including the exact CLI tag when builder content changes. See [Run in the builder image](framework-views/README.md#run-in-the-builder-image) for the consumer command.
+Use the top-level `Digest` field in `codebeltnet/docfx:2.81.0-v1.1.0@sha256:<published-image-index-digest>`. Record the digest from the approved release alongside the source commit. Convenience tags (`latest`, `2`, `2.81`, `2.81.0`) can move when the Codebelt engine or upstream CLI updates, while engine-qualified tags (`2-v1.1.0`, `2.81-v1.1.0`, `2.81.0-v1.1.0`) identify one published release and digest pinning provides content-addressed immutability. See [Run in the builder image](framework-views/README.md#run-in-the-builder-image) for the consumer command.

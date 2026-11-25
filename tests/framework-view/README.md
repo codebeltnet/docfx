@@ -45,7 +45,7 @@ Pop-Location
 pwsh -File tests/framework-view/Test-FrameworkView.ps1
 ```
 
-On Linux, install Chromium's system dependencies with `npx playwright install --with-deps chromium` if needed. Use `-SkipImageBuild -BuilderImage <image-reference>` to test an existing builder image. Registry publication and post-publish verification require release approval and registry access. See the [release procedure](../../README.md#publish-and-verify-the-builder-image).
+On Linux, install Chromium's system dependencies with `npx playwright install --with-deps chromium` if needed. Use `-SkipImageBuild -BuilderImage <image-reference>` to test an existing builder image. For CI-aligned native builder image validation (including OCI labels, architecture, SDKs, PowerShell 7, complete `/opt/docfx/framework-views` distribution, multi-framework build, and single-framework build), run `pwsh -NoProfile -File tests/Test-DocfxContainer.ps1 -Image <image-reference> -Platform linux/amd64`. Official production publication uses the build-once GitHub Actions release and deployment lifecycle described in [CI/CD release and deployment lifecycle](../../README.md#cicd-release-and-deployment-lifecycle).
 
 ## Cuemon.Kernel and Cuemon.IO
 

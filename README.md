@@ -141,7 +141,7 @@ Every image built with `Dockerfile` and `BuildAndPushDocfxImage.ps1` records bot
 
 ## Build the builder image locally
 
-From the repository root, use PowerShell 7 and Docker Buildx in Linux-container mode.
+From the repository root, use PowerShell 7 and Docker Buildx in Linux-container mode. The authoritative upstream DocFX CLI version is declared once in [`Dockerfile`](Dockerfile) (`ARG DOCFX_VERSION=2.81.0`) and validated against `framework-views/Build-DocfxFrameworkViews.ps1` and `templates/ms-style/framework-views.compat`.
 
 ```powershell
 pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -Tag docfx-local
@@ -154,36 +154,94 @@ pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -Tag docfx-local -EngineVersi
 docker inspect --format '{{json .Config.Labels}}' docfx-local:2.81.0-v1.1.0
 ```
 
+To plan tags and OCI metadata offline without invoking Docker or Git:
+
+```powershell
+pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -EngineVersion 1.1.0 -BuildOnly -Platform linux/amd64 -WhatIf -PassThru
+```
+
+To execute the same build-once OCI export, SBOM/provenance verification, Skopeo load, native container test suite (`tests/Test-DocfxContainer.ps1`), and loaded-config digest check used by CI (with no registry writes):
+
+```powershell
+pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -BuildOnly -EngineVersion 1.1.0 -Platform linux/amd64 -RequireNative -PassThru
+```
+
+`-BuildOnly` requires an OCI-capable Buildx `docker-container` builder (for example, `docker buildx create --driver docker-container --name docfx-builder --use`) and either native `skopeo` or a local Docker daemon (`unix://` / `npipe://`) for the pinned `quay.io/skopeo/stable:v1.20.0` utility container. Add `-SkipContainerTest` during rapid local iteration if you only need the verified OCI archive.
+
 Supply `-Platform linux/amd64` or `-Platform linux/arm64` to select a platform explicitly. AMD64 uses Alpine and ARM64 uses Ubuntu 26.04, whose .NET 11 SDK includes PowerShell 7 on ARM64. Use the corresponding package manager when extending either image.
 
-The script accepts `-DocfxVersion` for the upstream CLI and templates, `-EngineVersion` for the Codebelt engine Semantic Version (without a leading `v` or `+` build metadata), and `-DotnetVersion` for the SDK and runtime used by DocFX. The defaults package DocFX `2.81.0` and the .NET 10 and .NET 11 SDKs. Use `-FrameworkSdkImage` or `-FrameworkSdkArm64Image` to override the final SDK base on the corresponding platform. Keep the base's C library compatible with that platform's SDK stage and ensure the base supplies PowerShell 7. The [framework views compatibility contract](framework-views/README.md#template-compatibility) applies when changing the CLI or template.
+The script accepts `-DocfxVersion` (defaulting to `ARG DOCFX_VERSION` in `Dockerfile`), `-EngineVersion` for the Codebelt engine Semantic Version (without a leading `v` or `+` build metadata), and `-DotnetVersion` for the SDK and runtime used by DocFX. The defaults package DocFX `2.81.0` and the .NET 10 and .NET 11 SDKs. Use `-FrameworkSdkImage` or `-FrameworkSdkArm64Image` to override the final SDK base on the corresponding platform. Keep the base's C library compatible with that platform's SDK stage and ensure the base supplies PowerShell 7. The [framework views compatibility contract](framework-views/README.md#template-compatibility) applies when changing the CLI or template.
 
-To run the builder versioning and publication-safeguard unit tests with Pester 5 and verify 100% coverage of `BuildAndPushDocfxImage.ps1`:
-
-```powershell
-$configuration = New-PesterConfiguration
-$configuration.Run.Path = 'tests/BuildAndPushDocfxImage.Tests.ps1'
-$configuration.CodeCoverage.Enabled = $true
-$configuration.CodeCoverage.Path = 'BuildAndPushDocfxImage.ps1'
-$configuration.CodeCoverage.OutputPath = Join-Path ([IO.Path]::GetTempPath()) 'docfx-image-unit.xml'
-$configuration.CodeCoverage.CoveragePercentTarget = 100
-Invoke-Pester -Configuration $configuration
-```
-
-## Publish and verify the builder image
-
-For an authorized release, select a Buildx builder that can build `linux/amd64` and `linux/arm64`, using native nodes or emulation. Use `docker buildx inspect --bootstrap` to check the builder's platforms. If needed, create a builder with `docker buildx create --driver docker-container --name docfx-release --use`. Sign in to the destination registry and run the publishing script from the repository root with an explicit `-EngineVersion`:
+To run all PowerShell unit test suites with 100% enforced coverage (covering `framework-views/*.ps1`, `BuildAndPushDocfxImage.ps1`, `tools/DocfxImage.psm1`, and `tools/Invoke-DocfxRelease.ps1`) plus the `.NET 10` OCI artifact test suite (`tests/OciArtifact.Tests.ps1`):
 
 ```powershell
-pwsh -NoProfile -File ./BuildAndPushDocfxImage.ps1 -EngineVersion 1.1.0 -Publish
+pwsh -NoProfile -File ./tools/Invoke-UnitTests.ps1
 ```
 
-Publishing requires both `-Publish` and an explicit `-EngineVersion`, along with a clean Git commit revision (`git rev-parse HEAD`). Before building or pushing, the script inspects every engine-qualified destination tag in the registry and stops if any tag already exists or if the registry check fails unexpectedly. It then performs one multi-platform build (`linux/arm64` and `linux/amd64`) and pushes all applicable tags to the single resulting image index. After pushing, it verifies that every published tag resolves to the built image index digest and inspects both required platform image configs to verify their OS, architecture, and OCI version and revision labels. On success it prints `codebeltnet/docfx:2.81.0-v1.1.0@sha256:<published-image-index-digest>`. Use `-ContainerRegistry` and `-Tag` for a different registry namespace or repository.
+## CI/CD release and deployment lifecycle
 
-Inspect the published engine-qualified tag to retrieve the index digest and platform list after release:
+Official `codebeltnet/docfx` releases follow a build-once, promote-verified-artifact delivery lifecycle aligned with `codebeltnet/csrun`:
+
+```text
+Pull request (.github/workflows/pr.yml)
+    -> Required quality gate (unit tests + 100% coverage, native Windows/Linux, browser/routing, Cuemon, native AMD64 & ARM64 containers, workflow lint)
+    -> Merge to main
+    -> Push vMAJOR.MINOR.PATCH Git release tag (.github/workflows/release.yml)
+    -> Run full quality gates & native AMD64/ARM64 OCI builds (.github/workflows/container.yml)
+    -> Assemble multi-platform OCI index without rebuilding & verify via OciArtifact.cs + codebeltnet/oci-artifact-verify@v1
+    -> Create draft GitHub Release with durable split OCI assets & checksums, then clean transient CI artifacts
+    -> Human approves and publishes the GitHub Release (.github/workflows/deploy.yml)
+    -> Reconstruct & re-verify durable OCI assets, then promote to Docker Hub via Skopeo (--all --preserve-digests)
+    -> Verify all seven tags resolve to the exact multi-platform OCI index digest & re-verify downloaded registry content
+```
+
+### Workflow segregation
+
+| Workflow | Trigger | Purpose & permissions |
+| --- | --- | --- |
+| [`.github/workflows/pr.yml`](.github/workflows/pr.yml) | `pull_request` to `main`, `workflow_dispatch` | Runs workflow syntax linting (`actionlint`), `Dockerfile` `ARG DOCFX_VERSION` consistency checks, PowerShell unit tests with 100% coverage + `.NET 10` OCI tests (`ubuntu-26.04` & `windows-2025`), native framework-views regression (`ubuntu-26.04` with NGINX routing & `windows-2025`), Playwright browser & HTTP routing tests, pinned Cuemon acceptance tests, and native AMD64/ARM64 container validation via `container.yml`. Consolidated under **Required quality gate**. Strictly `contents: read`, fork-safe, zero secrets, no large OCI archive uploads. |
+| [`.github/workflows/container.yml`](.github/workflows/container.yml) | Reusable (`workflow_call`) | Invoked by both `pr.yml` and `release.yml`. Builds the candidate image once natively on `ubuntu-26.04` (`linux/amd64`) and `ubuntu-26.04-arm` (`linux/arm64`) with SBOM and maximum SLSA provenance, verifies the exported OCI archive, loads it via Skopeo, executes `tests/Test-DocfxContainer.ps1` on native CPU, and verifies `loaded-config` byte equality. Uploads full OCI archives only on tagged release pushes (1-day retention); PR runs upload small JSON metadata only. |
+| [`.github/workflows/release.yml`](.github/workflows/release.yml) | Push of `v*` tag | Validates strict `vMAJOR.MINOR.PATCH` release tag (authoritative Codebelt engine version without `v`), executes all quality gates and `container.yml`, assembles the exact tested AMD64 & ARM64 manifests into a single multi-platform OCI image index without rebuilding, verifies integrity with `tools/OciArtifact.cs` and `codebeltnet/oci-artifact-verify@v1`, splits assets <= 1 GiB (`docfx.oci.part000`, ...), creates a **draft GitHub Release** with `docfx-release.json` and `docfx.oci.tar.sha256`, verifies durable release asset attachment, and removes transient workflow artifacts. Never touches Docker Hub. |
+| [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) | GitHub Release `published`, `workflow_dispatch` | Resolves the approved latest published stable release from `main` (checking tag ancestry on `main` and rejecting drafts, prereleases, or superseded releases), reconstructs and verifies the durable OCI release assets (authoritative `release.yml` run attempt, both native results, checksums, attestations, and `codebeltnet/oci-artifact-verify@v1`), then promotes under the `Production` environment using Skopeo (`--all --preserve-digests`) without rebuilding. Serialized by concurrency group `docfx-production`. |
+
+### Authoritative versioning and promotion safeguards
+
+- **Release tag convention:** Git tags use `vMAJOR.MINOR.PATCH` (for example, `v1.1.0`), which defines Codebelt engine version `1.1.0`. The upstream DocFX CLI version (`2.81.0`) is maintained independently in `Dockerfile` (`ARG DOCFX_VERSION`).
+- **Single implementation:** Local builds (`BuildAndPushDocfxImage.ps1`), CI container validation, release assembly, and deployment promotion all share [`tools/DocfxImage.psm1`](tools/DocfxImage.psm1) and [`tools/OciArtifact.cs`](tools/OciArtifact.cs) (a `.NET 10` file-based C# application).
+- **Direct-publish safeguard:** `BuildAndPushDocfxImage.ps1 -Publish` intentionally refuses direct `docker buildx build --push` against the official `codebeltnet/docfx` (or `docker.io/codebeltnet/docfx`) repository so production releases cannot bypass build-once native verification and release approval. Custom or fork registries (for example, `-ContainerRegistry localhost:5000/team/`) remain supported for local/fork workflows.
+- **Two-phase promotion & conflict protection:** `deploy.yml` preflights all engine-qualified tags (`2.81.0-v1.1.0`, `2.81-v1.1.0`, `2-v1.1.0`) before any registry write. Missing tags are uploaded; tags already pointing to the exact expected OCI index digest are accepted for idempotent retry; any tag pointing to different content fails closed without overwriting. Floating convenience tags (`2.81.0`, `2.81`, `2`, `latest`) are updated only after all engine-qualified tags exist in the registry with the exact expected digest and after re-confirming the release is still the latest published stable release.
+- **Post-publish verification:** After promotion, `deploy.yml` inspects every promoted tag's raw manifest digest to prove no manifest rewriting occurred, then downloads the image by immutable digest (`codebeltnet/docfx@sha256:<index-digest>`) and re-verifies all blobs, both platforms, OCI labels, SPDX SBOM, and SLSA provenance.
+
+### Deployment recovery procedure
+
+To resume or recover a partially completed production deployment of the latest published release:
+
+1. Never rebuild the image or re-tag a release for recovery.
+2. In GitHub Actions, manually dispatch **Deploy Docker Hub images** (`.github/workflows/deploy.yml`) from branch `main` with `tag` set to the already-published latest release tag (for example, `v1.1.0`).
+3. `deploy.yml` loads deployment tooling from `main` (pinned to a single `deployment-sha`), downloads the original durable OCI assets from the GitHub Release, re-verifies checksums, the authoritative `release.yml` run, native results, and OCI attestations, skips any engine-qualified tag already matching the exact expected index digest, and completes the remaining promotions idempotently.
+4. Attempting to dispatch recovery from a non-`main` branch, for a draft/prerelease, or for an older superseded release is automatically rejected to prevent rolling back floating convenience tags (`latest`, `2`, `2.81`, `2.81.0`).
+
+### Manual GitHub & Docker Hub administrative configuration
+
+Adding workflow YAML files to this repository does **not** automatically configure GitHub environments, secrets, repository rulesets, or Docker Hub policies. Repository administrators must configure the following settings manually before running production deployments:
+
+1. **GitHub Environment (`Production`):**
+   - Create an environment named `Production` in `codebeltnet/docfx` (**Settings -> Environments**).
+   - Configure required reviewers and restrict deployment branches/tags appropriately.
+   - Add the following **environment secrets** (never repository-wide secrets exposed to PRs):
+     - `DOCKERHUB_USERNAME` — Docker Hub account username.
+     - `DOCKERHUB_TOKEN` — Docker Hub access token scoped strictly to `codebeltnet/docfx`.
+2. **Branch Ruleset (`main`):**
+   - Update the active `main` branch ruleset to require the consolidated status check **`Required quality gate`** from `.github/workflows/pr.yml`.
+3. **Docker Hub Selective Immutable Tags (recommended):**
+   - Enable selective immutable-tag rules on `codebeltnet/docfx` for engine-qualified tags using pattern `^.+-v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$` while keeping floating convenience tags movable.
+
+### Inspecting a published release
+
+After a release has been promoted to Docker Hub, inspect any published engine-qualified tag to retrieve the multi-platform image index digest:
 
 ```powershell
 docker buildx imagetools inspect codebeltnet/docfx:2.81.0-v1.1.0
 ```
 
-Use the top-level `Digest` field in `codebeltnet/docfx:2.81.0-v1.1.0@sha256:<published-image-index-digest>`. Record the digest from the approved release alongside the source commit. Convenience tags (`latest`, `2`, `2.81`, `2.81.0`) can move when the Codebelt engine or upstream CLI updates, while engine-qualified tags (`2-v1.1.0`, `2.81-v1.1.0`, `2.81.0-v1.1.0`) identify one published release and digest pinning provides content-addressed immutability. See [Run in the builder image](framework-views/README.md#run-in-the-builder-image) for the consumer command.
+Use the top-level `Digest` field in `codebeltnet/docfx:2.81.0-v1.1.0@sha256:<published-image-index-digest>` for content-addressed immutability. See [Run in the builder image](framework-views/README.md#run-in-the-builder-image) for the consumer command.

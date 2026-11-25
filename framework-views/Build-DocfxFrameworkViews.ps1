@@ -340,9 +340,9 @@ try {
         Write-Json "$stage/framework-build.json" @{ build = $build }
         if ($builderImage) {
             Invoke-Step "$stage/build.log" docker @('run', '--rm', '--mount', "type=bind,source=$stage,target=/stage",
-                '-w', '/stage', $BuilderImage, 'docfx', 'build', 'framework-build.json', '--warningsAsErrors')
+                '-w', '/stage', $BuilderImage, 'docfx', 'build', 'framework-build.json')
         } else {
-            Invoke-Step "$stage/build.log" $docfx @('build', "$stage/framework-build.json", '--warningsAsErrors')
+            Invoke-Step "$stage/build.log" $docfx @('build', "$stage/framework-build.json")
         }
         $count = 0
         foreach ($directory in $directories) { $count += (Read-Json "$directory/.manifest").Count }

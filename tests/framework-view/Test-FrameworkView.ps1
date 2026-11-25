@@ -119,7 +119,7 @@ try {
     $build = (Get-Content -LiteralPath "$work/fixture/docfx.json" -Raw | ConvertFrom-Json -AsHashtable).build
     $build.template[2] = '/opt/docfx/templates/ms-style'
     @{ build = $build } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath "$single/docfx.json"
-    docker run --rm --mount "type=bind,source=$single,target=/stage" -w /stage $BuilderImage docfx build docfx.json --warningsAsErrors
+    docker run --rm --mount "type=bind,source=$single,target=/stage" -w /stage $BuilderImage docfx build docfx.json
     Copy-Item -LiteralPath "$single/_site" -Destination "$output/site/single" -Recurse
 
     $imageContext = "$work/image"

@@ -1,0 +1,13 @@
+<Project>
+  <!-- Retain MSBuild's resolved DLL in Roslyn's compiler arguments. Loading
+       its project again with the documentation TFM can add a second identity. -->
+  <Target Name="_DocfxKeepCrossTargetReferences" AfterTargets="Compile" Condition="'$(DesignTimeBuild)' == 'true'">
+    <ItemGroup>
+      <_DocfxCrossTargetReference Include="@(ReferencePath)"
+        Condition="'%(ReferencePath.NearestTargetFramework)' != '' and
+                   '%(ReferencePath.NearestTargetFramework)' != '$(TargetFramework)' and
+                   '%(ReferencePath.OriginalProjectReferenceItemSpec)' != ''" />
+      <ProjectReference Remove="@(_DocfxCrossTargetReference->'%(OriginalProjectReferenceItemSpec)')" />
+    </ItemGroup>
+  </Target>
+</Project>

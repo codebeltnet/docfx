@@ -118,6 +118,7 @@ if ($actualCompat -cne $expectedCompat) {
 
 # 4. Representative multi-framework build, discovery, metadata, manifest, NGINX config, and single-framework build
 $work = Join-Path ([IO.Path]::GetTempPath()) ('docfx-container-test-' + [guid]::NewGuid().ToString('N'))
+$mount = "type=bind,source=$work,target=/workspace"
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 try {
     $fixture = Join-Path $work 'fixture'
@@ -129,7 +130,6 @@ try {
     '{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}' | Set-Content -LiteralPath (Join-Path $work 'sdk10/global.json')
     '{"sdk":{"version":"11.0.100","rollForward":"latestFeature"}}' | Set-Content -LiteralPath (Join-Path $fixture 'global.json')
 
-    $mount = "type=bind,source=$work,target=/workspace"
     $sdk10 = Invoke-ContainerCommand @('run', '--rm', '--platform', $Platform, '--mount', $mount, '-w', '/workspace/sdk10', $Image, 'sh', '-ec', 'dotnet --version && dotnet msbuild -nologo -version')
     $sdk11 = (Invoke-ContainerCommand @('run', '--rm', '--platform', $Platform, '--mount', $mount, '-w', '/workspace/fixture', $Image, 'dotnet', '--version')) -join ''
     if ($sdk10[0] -notmatch '^10\.' -or $sdk11.Trim() -notmatch '^11\.') {
@@ -211,10 +211,14 @@ try {
     if (!(Test-Path -LiteralPath (Join-Path $single '_site/index.html') -PathType Leaf)) {
         throw 'Ordinary single-framework docfx build did not produce _site/index.html.'
     }
-
-    Write-Host "PASS: Native container validation passed on $Platform ($runtimeArch): PowerShell $pwshVersion, DocFX $docfxActual, .NET $($sdk10[0]) & $($sdk11.Trim()), 5 framework views + single-framework build."
 } finally {
     if (Test-Path -LiteralPath $work) {
+        if ($IsLinux) {
+            # The packaged CLI runs as root. Return ownership of its bind-mounted outputs to the runner.
+            $owner = "$(& id -u):$(& id -g)"
+            $null = Invoke-ContainerCommand @('run', '--rm', '--platform', $Platform, '--mount', $mount, $Image, 'chown', '-Rh', $owner, '/workspace')
+        }
         Remove-Item -LiteralPath $work -Recurse -Force
     }
 }
+Write-Host "PASS: Native container validation passed on $Platform ($runtimeArch): PowerShell $pwshVersion, DocFX $docfxActual, .NET $($sdk10[0]) & $($sdk11.Trim()), 5 framework views + single-framework build."

@@ -189,6 +189,12 @@ function Invoke-Assemble {
         if ($verified.configs.$cpu -cne $record['ConfigDigest']) {
             throw "Native test record for '$cpu' does not match the assembled OCI image config digest."
         }
+        if ($verified.archiveSha256 -cne $record['ArchiveSha256']) {
+            throw "Native test record for '$cpu' does not match the OCI archive SHA-256."
+        }
+        if ($archiveFile.Length -ne $record['OciArchiveBytes']) {
+            throw "Native test record for '$cpu' does not match the OCI archive size."
+        }
         $verifiedInputs.Add($archiveFile.FullName)
     }
 

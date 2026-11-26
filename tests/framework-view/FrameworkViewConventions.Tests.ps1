@@ -1,5 +1,6 @@
 BeforeAll {
     . "$PSScriptRoot/../../framework-views/FrameworkViewConventions.ps1"
+    . "$PSScriptRoot/../../framework-views/DocfxMetadata.ps1"
 }
 
 Describe 'Framework view conventions' {
@@ -90,5 +91,124 @@ Describe 'Output ownership and path isolation' {
         $linkType = if ($IsWindows) { 'Junction' } else { 'SymbolicLink' }
         New-Item -ItemType $linkType -Path "$root/site/linked" -Target $directory.FullName | Out-Null
         { Get-FrameworkOutputEntries $root.FullName '.owner' '.lock' } | Should -Throw '*contains a link*'
+    }
+}
+
+Describe 'Page availability inventory, NGINX fallback rules and shared navigation TOC' {
+    It 'derives deterministic deduplicated page availability in framework precedence order' {
+        $site = (New-Item -ItemType Directory -Path "$TestDrive/avail-site").FullName
+        New-Item -ItemType Directory -Path "$site/api/dotnet", "$site/api/aspnet", "$site/_frameworks/net10/api/dotnet", "$site/_frameworks/net10/api/aspnet", "$site/_frameworks/netstandard2.0/api/dotnet", "$site/_frameworks/net48/api/legacy" -Force | Out-Null
+        Set-Content -LiteralPath "$site/api/dotnet/Common.html" 'net11'
+        Set-Content -LiteralPath "$site/api/aspnet/Endpoint.html" 'net11'
+        Set-Content -LiteralPath "$site/api/aspnet/toc.json" '{}'
+        Set-Content -LiteralPath "$site/_frameworks/net10/api/dotnet/Common.html" 'net10'
+        Set-Content -LiteralPath "$site/_frameworks/net10/api/aspnet/Endpoint.html" 'net10'
+        Set-Content -LiteralPath "$site/_frameworks/netstandard2.0/api/dotnet/Common.html" 'ns20'
+        Set-Content -LiteralPath "$site/_frameworks/net48/api/legacy/Legacy.html" 'net48'
+
+        $views = [ordered]@{
+            'net-11.0'        = [ordered]@{ directory = 'net11' }
+            'net-10.0'        = [ordered]@{ directory = 'net10' }
+            'netstandard-2.1' = [ordered]@{ directory = 'netstandard2.1' }
+            'netstandard-2.0' = [ordered]@{ directory = 'netstandard2.0' }
+            'net48'           = [ordered]@{ directory = 'net48' }
+        }
+
+        $availability = Get-FrameworkPageAvailability $site 'api' 'net-11.0' $views
+        @($availability.pages.Keys) | Should -BeExactly @('aspnet/Endpoint.html', 'dotnet/Common.html', 'legacy/Legacy.html')
+        $availability.sets[$availability.pages['aspnet/Endpoint.html']] | Should -BeExactly @('net-11.0', 'net-10.0')
+        $availability.sets[$availability.pages['dotnet/Common.html']] | Should -BeExactly @('net-11.0', 'net-10.0', 'netstandard-2.0')
+        $availability.sets[$availability.pages['legacy/Legacy.html']] | Should -BeExactly @('net48')
+        $availability.pages.Contains('aspnet/toc.json') | Should -BeFalse
+
+        # Duplicate availability set reuses the same set index.
+        Set-Content -LiteralPath "$site/api/aspnet/Second.html" 'net11'
+        Set-Content -LiteralPath "$site/_frameworks/net10/api/aspnet/Second.html" 'net10'
+        $updated = Get-FrameworkPageAvailability $site 'api' 'net-11.0' $views
+        $updated.pages['aspnet/Second.html'] | Should -Be $updated.pages['aspnet/Endpoint.html']
+        $updated.sets.Count | Should -Be 3
+    }
+
+    It 'generates ordered NGINX fallback rules for default and non-default views' {
+        $views = [ordered]@{
+            'net-11.0'        = [ordered]@{ directory = 'net11' }
+            'netstandard-2.0' = [ordered]@{ directory = 'netstandard2.0' }
+        }
+        $rules = @(Get-FrameworkNginxFallbackRules 'net-11.0' $views)
+        $rules.Count | Should -Be 2
+        $rules[0] | Should -BeExactly '        if (-f $document_root$framework_fallback_target) { return 302 $uri?${framework_query_prefix}view=net-11.0; }'
+        $rules[1] | Should -BeExactly '        if (-f $document_root/_frameworks/netstandard2.0$framework_fallback_target) { return 302 $uri?${framework_query_prefix}view=netstandard-2.0; }'
+    }
+
+    It 'normalizes API page paths and ignores non-API or empty hrefs' {
+        Resolve-FrameworkApiRelativePage '' 'api/' | Should -BeNullOrEmpty
+        Resolve-FrameworkApiRelativePage 'index.html' 'api/' | Should -BeNullOrEmpty
+        Resolve-FrameworkApiRelativePage '/api/dotnet/Common.html?view=net-10.0#top' 'api/' | Should -BeExactly 'dotnet/Common.html'
+        Resolve-FrameworkApiRelativePage 'api/legacy/' 'api/' | Should -BeExactly 'legacy/index.html'
+        Resolve-FrameworkApiRelativePage 'api/' 'api/' | Should -BeExactly 'index.html'
+    }
+
+    It 'merges unresolved non-default API navigation entries including nested items and handles edge cases' {
+        $work = (New-Item -ItemType Directory -Path "$TestDrive/toc-merge").FullName
+        $site = (New-Item -ItemType Directory -Path "$work/site").FullName
+        $views = [ordered]@{
+            'net-11.0'        = [ordered]@{ directory = 'net11' }
+            'net-10.0'        = [ordered]@{ directory = 'net10' }
+            'netstandard-2.0' = [ordered]@{ directory = 'netstandard2.0' }
+            'net48'           = [ordered]@{ directory = 'net48' }
+        }
+        $availability = [ordered]@{
+            sets  = @(, @('net-11.0'), @('netstandard-2.0', 'net48'))
+            pages = [ordered]@{
+                'dotnet/Common.html' = 0
+                'legacy/Legacy.html' = 1
+                'nested/Nested.html' = 1
+            }
+        }
+
+        # Missing toc.json is a no-op.
+        Merge-SharedNavigationToc $site $work '_site' 'api' 'net-11.0' $views $availability
+        Merge-NavigationTocItems $null @() 'api/' $availability | Should -BeFalse
+
+        # toc.json without items is a no-op.
+        Write-Json "$site/toc.json" @{ memberLayout = 'SamePage' }
+        Merge-SharedNavigationToc $site $work '_site' 'api' 'net-11.0' $views $availability
+
+        # toc.json with no candidate toc.json files is a no-op.
+        Write-Json "$site/toc.json" @{ items = @(@{ name = 'Concept'; href = 'index.html' }) }
+        Merge-SharedNavigationToc $site $work '_site' 'api' 'net-11.0' $views $availability
+
+        # Candidate toc.json exists with empty/shorter items and nested items.
+        New-Item -ItemType Directory -Path "$work/net10/_site", "$work/netstandard2.0/_site", "$work/net48/_site" -Force | Out-Null
+        Write-Json "$work/net10/_site/toc.json" @{ items = @(@{ name = 'Concept'; href = 'index.html' }) }
+        Write-Json "$work/netstandard2.0/_site/toc.json" @{
+            items = @(
+                @{ name = 'Concept'; href = 'index.html' }
+                @{ name = '.NET API'; href = 'api/dotnet/Common.html' }
+                @{ name = 'Legacy API'; href = 'api/legacy/Legacy.html'; topicHref = 'api/legacy/Legacy.html'; tocHref = 'api/legacy/toc.html' }
+                @{ name = 'Group'; items = @(@{ name = 'Nested'; href = 'api/nested/Nested.html' }) }
+            )
+        }
+        Write-Json "$work/net48/_site/toc.json" @{ memberLayout = 'SamePage' }
+        Write-Json "$site/toc.json" @{
+            items = @(
+                @{ name = 'Concept'; href = 'index.html' }
+                @{ name = '.NET API'; href = 'api/dotnet/Common.html' }
+                @{ name = 'Legacy API'; href = 'api/legacy/Legacy.yml' }
+                @{ name = 'Group'; items = @(@{ name = 'Nested'; href = 'api/nested/Nested.yml' }) }
+            )
+        }
+
+        Merge-SharedNavigationToc $site $work '_site' 'api' 'net-11.0' $views $availability
+        $merged = Read-Json "$site/toc.json"
+        $merged.items[2].href | Should -BeExactly 'api/legacy/Legacy.html'
+        $merged.items[2].topicHref | Should -BeExactly 'api/legacy/Legacy.html'
+        $merged.items[2].tocHref | Should -BeExactly 'api/legacy/toc.html'
+        $merged.items[3].items[0].href | Should -BeExactly 'api/nested/Nested.html'
+
+        # Re-running when everything is already resolved is an unchanged no-op.
+        $before = Get-Content -LiteralPath "$site/toc.json" -Raw
+        Merge-SharedNavigationToc $site $work '_site' 'api' 'net-11.0' $views $availability
+        Get-Content -LiteralPath "$site/toc.json" -Raw | Should -BeExactly $before
     }
 }

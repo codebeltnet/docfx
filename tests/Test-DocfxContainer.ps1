@@ -142,7 +142,7 @@ try {
     if (Get-ChildItem -LiteralPath $destination -Filter 'build-*.log' -Recurse) {
         throw 'Ordinary multi-framework metadata generation unexpectedly triggered a recovery build.'
     }
-    foreach ($project in 'Runtime', 'Utilities') {
+    foreach ($project in 'Runtime', 'Utilities', 'ModernApi', 'StandardApi') {
         if (!(Test-Path -LiteralPath (Join-Path $fixture "$project/obj/project.assets.json") -PathType Leaf)) {
             throw "Packaged generator did not restore '$project'."
         }
@@ -165,16 +165,27 @@ try {
     }
 
     $nginx = Get-Content -LiteralPath (Join-Path $destination 'nginx.conf') -Raw
-    if (-not $nginx.Contains('location ^~ /api/') -or $nginx -match '__(API|VIEWS|SEARCH)__') {
+    if (-not $nginx.Contains('location ^~ /api/') -or -not $nginx.Contains('location @framework_fallback') -or
+        $nginx -match '__(API|VIEWS|SEARCH|FALLBACK)__') {
         throw 'Generated NGINX configuration is incomplete or contains unsubstituted placeholders.'
     }
 
     $widget = 'api/runtime/FrameworkFixture.Runtime.Widget.html'
     $availability = @{
-        $widget                                                = @($expectedViews.Keys)
-        'api/utilities/FrameworkFixture.Utilities.Utility.html' = @($expectedViews.Keys)
+        $widget                                                   = @($expectedViews.Keys)
+        'api/utilities/FrameworkFixture.Utilities.Utility.html'   = @($expectedViews.Keys)
         'api/runtime/FrameworkFixture.Runtime.ModernFeature.html' = @('net-11.0', 'net-10.0')
+        'api/runtime/FrameworkFixture.Runtime.StandardFeature.html' = @('netstandard-2.1', 'netstandard-2.0')
         'api/runtime/FrameworkFixture.Runtime.LegacyFeature.html' = @('net48')
+        'api/modern/FrameworkFixture.ModernApi.Endpoint.html'     = @('net-11.0', 'net-10.0')
+        'api/standard/FrameworkFixture.StandardApi.Adapter.html'  = @('netstandard-2.1', 'netstandard-2.0')
+    }
+    foreach ($page in $availability.Keys) {
+        $relative = $page.Substring(4)
+        $actualSet = $manifest.availability.sets[$manifest.availability.pages[$relative]]
+        if (($actualSet -join ',') -cne ($availability[$page] -join ',')) {
+            throw "Unexpected manifest availability for '$page': $($actualSet -join ',')."
+        }
     }
     foreach ($view in $expectedViews.Keys) {
         $directory = $expectedViews[$view]

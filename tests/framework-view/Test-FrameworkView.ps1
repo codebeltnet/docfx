@@ -46,7 +46,7 @@ function Test-PackagedGenerator {
         throw 'Ordinary metadata generation ran a recovery compilation.'
     }
 
-    foreach ($project in 'Runtime', 'Utilities') {
+    foreach ($project in 'Runtime', 'Utilities', 'ModernApi', 'StandardApi') {
         if (!(Test-Path -LiteralPath "$fixture/$project/obj/project.assets.json" -PathType Leaf)) {
             throw "The packaged generator did not restore '$project'."
         }
@@ -65,15 +65,26 @@ function Test-PackagedGenerator {
         throw 'The packaged generator did not discover and package the expected views.'
     }
     $nginx = Get-Content -LiteralPath "$destination/nginx.conf" -Raw
-    if (!$nginx.Contains('location ^~ /api/') -or $nginx -match '__(API|VIEWS|SEARCH)__') {
-        throw 'The packaged generator did not configure the API routes.'
+    if (!$nginx.Contains('location ^~ /api/') -or !$nginx.Contains('location @framework_fallback') -or
+        $nginx -match '__(API|VIEWS|SEARCH|FALLBACK)__') {
+        throw 'The packaged generator did not configure the API and fallback routes.'
     }
     $widget = 'api/runtime/FrameworkFixture.Runtime.Widget.html'
     $availability = @{
         $widget = $expectedViews.Keys
         'api/utilities/FrameworkFixture.Utilities.Utility.html' = $expectedViews.Keys
         'api/runtime/FrameworkFixture.Runtime.ModernFeature.html' = 'net-11.0', 'net-10.0'
+        'api/runtime/FrameworkFixture.Runtime.StandardFeature.html' = 'netstandard-2.1', 'netstandard-2.0'
         'api/runtime/FrameworkFixture.Runtime.LegacyFeature.html' = 'net48'
+        'api/modern/FrameworkFixture.ModernApi.Endpoint.html' = 'net-11.0', 'net-10.0'
+        'api/standard/FrameworkFixture.StandardApi.Adapter.html' = 'netstandard-2.1', 'netstandard-2.0'
+    }
+    foreach ($page in $availability.Keys) {
+        $relative = $page.Substring(4)
+        $actualSet = $manifest.availability.sets[$manifest.availability.pages[$relative]]
+        if (($actualSet -join ',') -cne (@($availability[$page]) -join ',')) {
+            throw "Unexpected manifest availability for '$page': $($actualSet -join ',')."
+        }
     }
     foreach ($view in $expectedViews.Keys) {
         $directory = $expectedViews[$view]

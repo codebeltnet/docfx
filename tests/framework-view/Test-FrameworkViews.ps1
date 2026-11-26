@@ -131,9 +131,14 @@ if ($ProjectSdk8 -and [version](Get-Content -LiteralPath "$fresh/resolver-sdk.lo
     throw 'The resolver did not select a modern SDK independently of the project pin.'
 }
 $site = "$fresh/site"
-$manifest = Get-Content "$site/framework-views.json" -Raw | ConvertFrom-Json
+$manifest = Get-Content "$site/framework-views.json" -Raw | ConvertFrom-Json -AsHashtable
 if (($manifest.viewOrder -join ',') -cne "$defaultView,$otherView" -or $manifest.defaultView -cne $defaultView -or $manifest.apiPath -cne '/reference/') {
     throw 'The generated manifest does not reflect the inferred API root and framework precedence.'
+}
+if ($manifest.availability.sets[$manifest.availability.pages['runtime/FrameworkFixture.Modern.html']] -join ',' -cne $defaultView -or
+    $manifest.availability.sets[$manifest.availability.pages['legacy/FrameworkFixture.Compatibility.Legacy.html']] -join ',' -cne $otherView -or
+    $manifest.availability.sets[$manifest.availability.pages['runtime/FrameworkFixture.Common.html']] -join ',' -cne "$defaultView,$otherView") {
+    throw 'The generated page availability inventory does not reflect the native DocFX output.'
 }
 foreach ($assembly in @(
     @{ path = "$root/src/Runtime/bin/Release/$defaultTfm/Runtime.dll"; identity = 'Runtime, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null' }
@@ -215,18 +220,54 @@ if ($TestRouting) {
             @{ path = "/reference/runtime/index.html?view=$otherView"; status = 200; body = 'other API index' }
             @{ path = "/reference/runtime/FrameworkFixture.Common.html?view=$otherView"; status = 200; body = 'FrameworkFixture' }
             @{ path = '/reference/runtime/?view=unknown'; status = 400; body = 'Unknown documentation view.' }
-            @{ path = "/reference/runtime/FrameworkFixture.Modern.html?view=$otherView"; status = 404 }
-            @{ path = '/reference/legacy/'; status = 404 }
+            @{ path = "/reference/runtime/FrameworkFixture.Modern.html?view=$otherView"; status = 302; location = "/reference/runtime/FrameworkFixture.Modern.html?view=$defaultView" }
+            @{ path = "/reference/runtime/FrameworkFixture.Modern.html?tag=a&view=$otherView&tag=b"; status = 302; location = "/reference/runtime/FrameworkFixture.Modern.html?tag=a&tag=b&view=$defaultView" }
+            @{ path = "/reference/runtime/FrameworkFixture.Modern.html?tag=a&VIEW=$otherView&view=$otherView&tag=b"; status = 302; location = "/reference/runtime/FrameworkFixture.Modern.html?tag=a&tag=b&view=$defaultView" }
+            @{ path = "/reference/runtime/FrameworkFixture.Modern.html?view=$otherView&view=$otherView&view=$otherView"; status = 400; body = 'Unknown documentation view.' }
+            @{ path = '/reference/legacy/'; status = 302; location = "/reference/legacy/?view=$otherView" }
             @{ path = "/reference/legacy/?view=$otherView"; status = 200; body = 'other legacy index' }
+            @{ path = "/reference/legacy/FrameworkFixture.Compatibility.Legacy.html?view=$defaultView"; status = 302; location = "/reference/legacy/FrameworkFixture.Compatibility.Legacy.html?view=$otherView" }
+            @{ path = "/reference/runtime/DoesNotExist.html?view=$otherView"; status = 404 }
+            @{ path = '/reference/legacy/toc.json'; status = 404 }
+            @{ path = '/reference/runtime/missing.png'; status = 404 }
         )
-        foreach ($expected in $responses) {
-            $result = Invoke-WebRequest "http://$endpoint$($expected.path)" -SkipHttpErrorCheck -MaximumRedirection 0
-            $body = if ($result.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($result.Content) } else { $result.Content }
-            $expectedBody = $expected['body']
-            if ($result.StatusCode -ne $expected.status -or ($expectedBody -and !$body.Contains($expectedBody)) -or
-                $result.Headers['Cache-Control'] -notlike '*no-store*' -or $result.Headers['ETag']) {
-                throw "Unexpected routing or caching for '$($expected.path)' (HTTP $($result.StatusCode))."
+        $handler = [Net.Http.HttpClientHandler]::new()
+        $handler.AllowAutoRedirect = $false
+        $client = [Net.Http.HttpClient]::new($handler)
+        $client.Timeout = [TimeSpan]::FromSeconds(10)
+        try {
+            $baseUri = [uri]"http://$endpoint"
+            foreach ($expected in $responses) {
+                $response = $client.GetAsync([uri]::new($baseUri, $expected.path)).GetAwaiter().GetResult()
+                try {
+                    $statusCode = [int]$response.StatusCode
+                    $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                    $expectedBody = $expected['body']
+                    $expectedLocation = $expected['location']
+                    $actualLocation = if ($response.Headers.Location) { $response.Headers.Location.OriginalString }
+                    $cacheControl = if ($response.Headers.CacheControl) { $response.Headers.CacheControl.ToString() } else { '' }
+                    if ($statusCode -ne $expected.status -or ($expectedBody -and !$body.Contains($expectedBody)) -or
+                        ($expectedLocation -and $actualLocation -cne $expectedLocation) -or
+                        (!$expectedLocation -and $actualLocation) -or
+                        $cacheControl -notlike '*no-store*' -or $response.Headers.ETag) {
+                        throw "Unexpected routing or caching for '$($expected.path)' (HTTP $statusCode, Location '$actualLocation')."
+                    }
+                } finally {
+                    $response.Dispose()
+                }
+                if ($expectedLocation) {
+                    $follow = $client.GetAsync([uri]::new($baseUri, $expectedLocation)).GetAwaiter().GetResult()
+                    try {
+                        if ([int]$follow.StatusCode -ne 200) {
+                            throw "Fallback destination '$expectedLocation' returned HTTP $([int]$follow.StatusCode)."
+                        }
+                    } finally {
+                        $follow.Dispose()
+                    }
+                }
             }
+        } finally {
+            $client.Dispose()
         }
     } finally {
         & docker stop $container | Out-Null

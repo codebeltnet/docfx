@@ -143,7 +143,12 @@ switch ($args[0]) {
     It 'continues through rendering on ordinary warnings and skips metadata on a warm cache' {
         & $build -DocfxConfig $config -OutputRoot $output -MetadataCache $cache -MetadataCacheKey 'fixture'
         Test-Path -LiteralPath "$output/site/api/Library.html" | Should -BeTrue
-        (Get-Content -LiteralPath "$output/site/framework-views.json" -Raw | ConvertFrom-Json).defaultView | Should -BeExactly 'net-11.0'
+        $manifest = Get-Content -LiteralPath "$output/site/framework-views.json" -Raw | ConvertFrom-Json -AsHashtable
+        $manifest.defaultView | Should -BeExactly 'net-11.0'
+        $manifest.availability.sets[$manifest.availability.pages['Library.html']] | Should -BeExactly @('net-11.0', 'net-10.0')
+        $nginx = Get-Content -LiteralPath "$output/nginx.conf" -Raw
+        $nginx | Should -Not -Match '__(API|VIEWS|SEARCH|FALLBACK)__'
+        $nginx | Should -Match 'location @framework_fallback'
         @(Get-ChildItem -LiteralPath $cache -Filter '*.zip' -Recurse).Count | Should -Be 2
         & $build -DocfxConfig $config -OutputRoot $output -MetadataCache $cache -MetadataCacheKey 'fixture'
         @(Select-String -LiteralPath "$fixture/docfx.log" -Pattern '^metadata .* --noRestore$').Count | Should -Be 2

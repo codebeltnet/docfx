@@ -9,6 +9,16 @@
       "src": [{ "src": "..", "files": ["Utilities/Utilities.csproj"] }],
       "dest": "api/utilities",
       "memberLayout": "separatePages"
+    },
+    {
+      "src": [{ "src": "..", "files": ["ModernApi/ModernApi.csproj"] }],
+      "dest": "api/modern",
+      "memberLayout": "separatePages"
+    },
+    {
+      "src": [{ "src": "..", "files": ["StandardApi/StandardApi.csproj"] }],
+      "dest": "api/standard",
+      "memberLayout": "separatePages"
     }
   ],
   "build": {

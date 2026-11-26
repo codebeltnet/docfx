@@ -148,6 +148,102 @@ Describe 'Page availability inventory, NGINX fallback rules and shared navigatio
         Resolve-FrameworkApiRelativePage 'api/' 'api/' | Should -BeExactly 'index.html'
     }
 
+    It 'resolves reordered siblings to their own destinations' {
+        $availability = @{ pages = @{ 'First.html' = 0; 'Second.html' = 0 } }
+        $target = @(
+            @{ name = 'First API'; href = '/api/First.yml#members' }
+            @{ name = 'Second API'; href = 'api/Second.yml' }
+        )
+        $candidates = , @(
+            @{ name = 'Second API'; href = 'api/Second.html' }
+            @{ name = 'First API'; href = 'api/First.html#members' }
+        )
+
+        Merge-NavigationTocItems $target $candidates 'api/' $availability | Should -BeTrue
+        $target[0].href | Should -BeExactly 'api/First.html#members'
+        $target[1].href | Should -BeExactly 'api/Second.html'
+    }
+
+    It 'leaves a missing intermediate sibling unresolved and matches the following sibling' {
+        $availability = @{ pages = @{ 'First.html' = 0; 'Last.html' = 0 } }
+        $target = @(
+            @{ name = 'First API'; href = 'api/First.html' }
+            @{ name = 'Missing API'; href = 'api/Missing.yml' }
+            @{ name = 'Last API'; href = 'api/Last.yml' }
+        )
+        $candidates = , @(
+            @{ name = 'First API'; href = 'api/First.html' }
+            @{ name = 'Last API'; href = 'api/Last.html' }
+        )
+
+        Merge-NavigationTocItems $target $candidates 'api/' $availability | Should -BeTrue
+        $target[1].href | Should -BeExactly 'api/Missing.yml'
+        $target[2].href | Should -BeExactly 'api/Last.html'
+    }
+
+    It 'matches nested entries only within their matched parent and skips unrelated links with the same name' {
+        $availability = @{ pages = @{ 'Shared.html' = 0; 'Other.html' = 0; 'Match.html' = 0 } }
+        $target = @(
+            @{ name = 'Missing Group'; items = @(@{ name = 'Shared'; href = 'api/Shared.yml' }) }
+            @{ name = 'Group'; items = @(
+                @{ name = 'Shared'; href = 'api/Shared.yml' }
+                @{ name = 'Match'; href = 'api/Match.yml' }
+            ) }
+        )
+        $candidates = , @(
+            @{ name = 'Other Group'; items = @(@{ name = 'Shared'; href = 'api/Shared.html' }) }
+            @{ name = 'Group'; items = @(
+                @{ name = 'Match'; href = 'api/Match.html' }
+                @{ name = 'Shared'; href = 'api/Other.html' }
+            ) }
+        )
+
+        Merge-NavigationTocItems $target $candidates 'api/' $availability | Should -BeTrue
+        $target[0].items[0].href | Should -BeExactly 'api/Shared.yml'
+        $target[1].items[0].href | Should -BeExactly 'api/Shared.yml'
+        $target[1].items[1].href | Should -BeExactly 'api/Match.html'
+    }
+
+    It 'skips ambiguous sibling identities in either TOC' {
+        $availability = @{ pages = @{ 'DuplicateTarget.html' = 0; 'DuplicateCandidate.html' = 0 } }
+        $target = @(
+            @{ name = 'Duplicate target'; href = 'api/DuplicateTarget.yml' }
+            @{ name = 'Duplicate target'; href = 'api/DuplicateTarget.yml' }
+            @{ name = 'Duplicate candidate'; href = 'api/DuplicateCandidate.yml' }
+        )
+        $candidates = , @(
+            @{ name = 'Duplicate target'; href = 'api/DuplicateTarget.html' }
+            @{ name = 'Duplicate candidate'; href = 'api/DuplicateCandidate.html'; tocHref = 'api/one/toc.html' }
+            @{ name = 'Duplicate candidate'; href = 'api/DuplicateCandidate.html'; tocHref = 'api/two/toc.html' }
+        )
+
+        Merge-NavigationTocItems $target $candidates 'api/' $availability | Should -BeFalse
+        $target.href | Should -BeExactly @('api/DuplicateTarget.yml', 'api/DuplicateTarget.yml', 'api/DuplicateCandidate.yml')
+    }
+
+    It 'requires a name and keeps framework precedence among matching available destinations' {
+        $availability = @{ pages = @{ 'Section.html' = 0; 'Unnamed.html' = 0 } }
+        $target = @(
+            @{ name = 'Section'; href = 'api/Section.yml#members' }
+            @{ href = 'api/Unnamed.yml' }
+        )
+        $candidates = @(
+            , $null
+            , @(
+                @{ name = 'Section'; href = 'api/Section.html#examples' }
+                @{ name = 'section'; href = 'api/Section.html#members' }
+                @{ href = 'api/Unnamed.html' }
+            )
+            , @(@{ name = 'Section'; href = 'api/Section.yml#members' })
+            , @(@{ name = 'Section'; href = '/api/Section.html#members' })
+            , @(@{ name = 'Section'; href = 'api/Section.html#members' })
+        )
+
+        Merge-NavigationTocItems $target $candidates 'api/' $availability | Should -BeTrue
+        $target[0].href | Should -BeExactly '/api/Section.html#members'
+        $target[1].href | Should -BeExactly 'api/Unnamed.yml'
+    }
+
     It 'merges unresolved non-default API navigation entries including nested items and handles edge cases' {
         $work = (New-Item -ItemType Directory -Path "$TestDrive/toc-merge").FullName
         $site = (New-Item -ItemType Directory -Path "$work/site").FullName

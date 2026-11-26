@@ -147,8 +147,16 @@
         if (['500', '502', '503', '504'].includes(error.dataset.status)) {
             const retry = byId('docfx-error-retry');
             retry.hidden = false;
-            // A fresh navigation retries the URL as a GET, including after a failed POST.
-            retry.addEventListener('click', () => location.assign(current.href));
+            retry.addEventListener('click', () => {
+                // Temporarily change the history URL so a fragment target triggers a document navigation.
+                if (current.href.includes('#')) {
+                    const historyUrl = new URL(current);
+                    historyUrl.searchParams.append('_docfx_retry', '');
+                    history.replaceState(history.state, '', historyUrl);
+                }
+                // A new navigation uses GET even after a failed POST and replaces the temporary history URL.
+                location.replace(current.href);
+            });
         }
         showFrameworkContext(error.dataset);
     }

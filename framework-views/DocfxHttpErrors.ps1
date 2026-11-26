@@ -34,14 +34,15 @@ function New-DocfxHttpErrors([string] $Stage, $Build, [string] $ApiPath) {
 }
 
 function Complete-DocfxHttpErrors([string] $Site, [int[]] $Statuses) {
-    # Compatible templates already load this shared asset on normal documentation pages.
+    # Compatible templates load this asset on documentation pages, where the recovery script records the last page.
     Add-Content -LiteralPath "$Site/public/framework-view.js" -Value ("`n" + (Get-Content -LiteralPath "$PSScriptRoot/http-error.js" -Raw))
+    Copy-Item -LiteralPath "$PSScriptRoot/http-error.js" -Destination "$Site/public/docfx-http-error.js"
     $head = @'
 $0
     <base href="/_docfx-errors/">
     <meta name="robots" content="noindex">
     <meta name="referrer" content="no-referrer">
-    <script defer src="/public/framework-view.js"></script>
+    <script defer src="/public/docfx-http-error.js"></script>
 '@
     foreach ($status in $Statuses) {
         $path = "$Site/_docfx-errors/$status.html"

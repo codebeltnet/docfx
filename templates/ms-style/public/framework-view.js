@@ -1,26 +1,40 @@
 (() => {
     const meta = name => document.querySelector(`meta[name="docfx:${name}"]`);
+    const apiMeta = meta('framework-api');
+    if (!apiMeta?.content) return;
+    const api = apiMeta.content;
     const current = new URL(location.href);
-    const api = meta('framework-api').content;
+    const isApiPage = current.pathname.startsWith(api);
     // Match NGINX's $arg_view lookup, which is case-insensitive for the argument name.
-    const view = current.search.match(/(?:^\?|&)view=([^&]*)/i)?.[1];
-    if (!current.pathname.startsWith(api)) return;
-    document.addEventListener('DOMContentLoaded', initializeSelector);
-    if (!view) return;
+    const view = isApiPage ? current.search.match(/(?:^\?|&)view=([^&]*)/i)?.[1] : undefined;
 
-    const toc = meta('tocrel');
-    if (toc?.content) {
-        const url = new URL(toc.content, current);
-        if (url.origin === current.origin && url.pathname.startsWith(api)) {
-            url.pathname = url.pathname.replace(/\.html$/i, '.json');
-            setView(url, view);
-            toc.content = url.href;
+    let manifest = null;
+    const manifestReady = fetch('/framework-views.json')
+        .then(response => (response.ok ? response.json() : null))
+        .then(data => {
+            if (data?.schemaVersion === 1 && data.apiPath === api) {
+                manifest = data;
+            }
+            return manifest;
+        })
+        .catch(() => null);
+
+    const searchRoot = view ? `/_framework-search/${meta('framework-directory').content}/` : null;
+
+    if (view) {
+        const toc = meta('tocrel');
+        if (toc?.content) {
+            const url = new URL(toc.content, current);
+            if (url.origin === current.origin && url.pathname.startsWith(api)) {
+                url.pathname = url.pathname.replace(/\.html$/i, '.json');
+                setView(url, view);
+                toc.content = url.href;
+            }
         }
-    }
 
-    const searchRoot = `/_framework-search/${meta('framework-directory').content}/`;
-    const search = meta('rel');
-    if (search) search.content = searchRoot;
+        const search = meta('rel');
+        if (search) search.content = searchRoot;
+    }
 
     function setView(url, selected) {
         for (const key of [...url.searchParams.keys()]) {
@@ -29,20 +43,79 @@
         url.searchParams.set('view', selected);
     }
 
+    function getUrlView(url) {
+        return url.search.match(/(?:^\?|&)view=([^&]*)/i)?.[1] || null;
+    }
+
+    function isPagePath(pathname) {
+        return pathname.endsWith('.html') || pathname.endsWith('/');
+    }
+
+    function resolveAvailableViews(pathname) {
+        const availability = manifest?.availability;
+        if (!availability?.pages || !availability?.sets || !pathname.startsWith(api)) return null;
+        let relative = pathname.slice(api.length);
+        try {
+            relative = decodeURIComponent(relative);
+        } catch {
+            return null;
+        }
+        const lookup = relative === '' || relative.endsWith('/') ? relative + 'index.html' : relative;
+        const setIndex = availability.pages[lookup];
+        if (typeof setIndex !== 'number') return null;
+        return availability.sets[setIndex] ?? null;
+    }
+
+    function resolveView(pathname, preferred) {
+        const available = resolveAvailableViews(pathname);
+        if (!available?.length) return null;
+        if (preferred && available.includes(preferred)) return preferred;
+        return available[0];
+    }
+
     function preserveView(anchor) {
         const href = anchor.getAttribute('href');
         if (!href || href.startsWith('#')) return;
-        const url = new URL(href, current);
+        let url;
+        try {
+            url = new URL(href, current);
+        } catch {
+            return;
+        }
         if (url.origin !== current.origin) return;
-        const fromSearch = url.pathname.startsWith(searchRoot);
+        const fromSearch = Boolean(searchRoot && url.pathname.startsWith(searchRoot));
         if (fromSearch) url.pathname = '/' + url.pathname.slice(searchRoot.length);
         const isApi = url.pathname.startsWith(api);
-        if (isApi) setView(url, view);
-        if (fromSearch || isApi) {
+
+        let targetView = null;
+        let shouldRewrite = fromSearch;
+
+        if (isApi && isPagePath(url.pathname)) {
+            if (view) {
+                targetView = resolveView(url.pathname, view) ?? view;
+                setView(url, targetView);
+                shouldRewrite = true;
+            } else if (manifest) {
+                const order = manifest.viewOrder ?? Object.keys(manifest.views);
+                const explicit = getUrlView(url);
+                if (!explicit || order.includes(explicit)) {
+                    const preferred = explicit || manifest.defaultView;
+                    const resolved = resolveView(url.pathname, preferred);
+                    if (resolved && resolved !== preferred) {
+                        targetView = resolved;
+                        setView(url, resolved);
+                        shouldRewrite = true;
+                    }
+                }
+            }
+        }
+
+        if (shouldRewrite) {
             const canonical = url.pathname + url.search + url.hash;
             if (canonical !== href) anchor.setAttribute('href', canonical);
             if (fromSearch && anchor.matches('#search-results .item-title > a')) {
-                anchor.dataset.frameworkUrl = url.pathname + (isApi ? `?view=${encodeURIComponent(view)}` : '') + url.hash;
+                const displayView = targetView ?? view;
+                anchor.dataset.frameworkUrl = url.pathname + (isApi && displayView ? `?view=${encodeURIComponent(displayView)}` : '') + url.hash;
             }
         }
     }
@@ -52,7 +125,7 @@
         node.querySelectorAll?.('a[href]').forEach(preserveView);
     }
 
-    // DocFX renders the TOC, breadcrumbs, prev/next and search results after the HTML loads.
+    // DocFX renders the navbar, TOC, breadcrumbs, prev/next and search results after the HTML loads.
     // Observe href changes too because its renderer reuses links on search and TOC updates.
     new MutationObserver(records => {
         for (const record of records) {
@@ -62,7 +135,13 @@
     }).observe(document.documentElement, {
         subtree: true, childList: true, attributes: true, attributeFilter: ['href']
     });
-    document.addEventListener('DOMContentLoaded', () => updateLinks(document));
+    document.addEventListener('DOMContentLoaded', () => {
+        updateLinks(document);
+        if (isApiPage) initializeSelector();
+    });
+    manifestReady.then(data => {
+        if (data) updateLinks(document);
+    });
 
     function frameworkName(entry) {
         const framework = /^net([1-4])(\d)(\d*)$/.exec(entry.tfm);
@@ -91,23 +170,16 @@
         const article = document.querySelector('article[data-uid]');
         if (!container || !article?.dataset.uid) return;
 
-        let manifest;
-        try {
-            const response = await fetch('/framework-views.json');
-            if (!response.ok) return;
-            manifest = await response.json();
-        } catch {
-            return;
-        }
-        if (manifest.schemaVersion !== 1 || manifest.apiPath !== api) return;
+        const loaded = await manifestReady;
+        if (!loaded) return;
 
-        const displayed = view || manifest.defaultView;
-        const order = manifest.viewOrder ?? Object.keys(manifest.views);
+        const displayed = view || loaded.defaultView;
+        const order = loaded.viewOrder ?? Object.keys(loaded.views);
         if (order.length < 2 || !order.includes(displayed)) return;
 
         const select = document.getElementById('framework-view-select');
         const status = document.getElementById('framework-view-status');
-        for (const id of order) select.add(new Option(frameworkName(manifest.views[id]), id));
+        for (const id of order) select.add(new Option(frameworkName(loaded.views[id]), id));
         select.value = displayed;
         container.hidden = false;
 
@@ -123,7 +195,7 @@
         }
 
         function showFallback(requested, selected) {
-            status.textContent = `This API is not documented for ${frameworkName(manifest.views[requested])}. Showing ${frameworkName(manifest.views[selected])}.`;
+            status.textContent = `This API is not documented for ${frameworkName(loaded.views[requested])}. Showing ${frameworkName(loaded.views[selected])}.`;
         }
 
         select.addEventListener('change', async () => {
@@ -136,10 +208,9 @@
                 const page = new URL(location.href);
                 const anchor = findAnchor(page.hash.slice(1));
                 const uid = anchor?.dataset.uid || article.dataset.uid;
-                const index = order.indexOf(requested);
-                const candidates = new Set([requested, ...order.slice(0, index).reverse(), displayed, ...order.slice(index + 1)]);
+                const candidates = new Set([requested, ...order]);
                 for (const candidate of candidates) {
-                    const target = await findUid(manifest.views[candidate], uid);
+                    const target = await findUid(loaded.views[candidate], uid);
                     if (!target) continue;
 
                     if (candidate === displayed) {

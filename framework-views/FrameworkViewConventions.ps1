@@ -83,3 +83,110 @@ function Get-FrameworkOutputEntries([string] $Path, [string] $OwnershipFile, [st
     $links = Get-ChildItem -LiteralPath $Path -Force -Recurse -Attributes ReparsePoint | Select-Object -First 1
     if ($links) { throw "Framework output contains a link. Move '$($links.FullName)' before rebuilding." }
 }
+
+function Get-FrameworkPageAvailability([string] $SiteRoot, [string] $ApiPath, [string] $DefaultView, $Views) {
+    $pageViews = [Collections.Generic.Dictionary[string, Collections.Generic.List[string]]]::new([StringComparer]::Ordinal)
+    foreach ($view in $Views.Keys) {
+        $viewApiRoot = if ($view -ceq $DefaultView) {
+            Join-Path $SiteRoot $ApiPath
+        } else {
+            Join-Path $SiteRoot "_frameworks/$($Views[$view].directory)/$ApiPath"
+        }
+        if (!(Test-Path -LiteralPath $viewApiRoot -PathType Container)) { continue }
+        foreach ($file in [IO.Directory]::EnumerateFiles($viewApiRoot, '*.html', [IO.SearchOption]::AllDirectories)) {
+            $relative = [IO.Path]::GetRelativePath($viewApiRoot, $file).Replace('\', '/')
+            if (!$pageViews.ContainsKey($relative)) {
+                $pageViews[$relative] = [Collections.Generic.List[string]]::new()
+            }
+            $pageViews[$relative].Add($view)
+        }
+    }
+
+    $setIndexes = [Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
+    $sets = [Collections.Generic.List[string[]]]::new()
+    $pages = [ordered]@{}
+    $sortedKeys = [string[]]$pageViews.Keys
+    [Array]::Sort($sortedKeys, [StringComparer]::Ordinal)
+    foreach ($relative in $sortedKeys) {
+        $available = $pageViews[$relative].ToArray()
+        $key = $available -join ','
+        if (!$setIndexes.ContainsKey($key)) {
+            $setIndexes[$key] = $sets.Count
+            $sets.Add($available)
+        }
+        $pages[$relative] = $setIndexes[$key]
+    }
+    [ordered]@{ sets = $sets.ToArray(); pages = $pages }
+}
+
+function Get-FrameworkNginxFallbackRules([string] $DefaultView, $Views) {
+    foreach ($view in $Views.Keys) {
+        $prefix = if ($view -ceq $DefaultView) { '' } else { "/_frameworks/$($Views[$view].directory)" }
+        '        if (-f $document_root{0}$framework_fallback_target) {{ return 302 $uri?${{framework_query_prefix}}view={1}; }}' -f $prefix, $view
+    }
+}
+
+function Resolve-FrameworkApiRelativePage([string] $Href, [string] $ApiPrefix) {
+    if (!$Href) { return $null }
+    $normalized = ($Href -split '[?#]', 2)[0].TrimStart('/')
+    if (!$normalized.StartsWith($ApiPrefix, [StringComparison]::Ordinal)) { return $null }
+    $relative = $normalized.Substring($ApiPrefix.Length)
+    if (!$relative -or $relative.EndsWith('/')) { "${relative}index.html" } else { $relative }
+}
+
+function Merge-NavigationTocItems($TargetItems, $CandidateItemLists, [string] $ApiPrefix, $Availability) {
+    $changed = $false
+    if (!$TargetItems) { return $false }
+    for ($index = 0; $index -lt $TargetItems.Count; $index++) {
+        $item = $TargetItems[$index]
+        $href = if ($item.Contains('href')) { $item['href'] }
+        $relative = Resolve-FrameworkApiRelativePage $href $ApiPrefix
+        if ($relative -and !$Availability.pages.Contains($relative)) {
+            foreach ($candidateList in $CandidateItemLists) {
+                if (!$candidateList -or $index -ge $candidateList.Count) { continue }
+                $candidate = $candidateList[$index]
+                $candidateHref = if ($candidate.Contains('href')) { $candidate['href'] }
+                $candidateRelative = Resolve-FrameworkApiRelativePage $candidateHref $ApiPrefix
+                if ($candidateRelative -and $Availability.pages.Contains($candidateRelative)) {
+                    $item['href'] = $candidateHref
+                    foreach ($field in 'topicHref', 'tocHref') {
+                        if ($candidate.Contains($field)) { $item[$field] = $candidate[$field] }
+                    }
+                    $changed = $true
+                    break
+                }
+            }
+        }
+        if ($item.Contains('items') -and $item['items']) {
+            $childCandidates = @(
+                foreach ($candidateList in $CandidateItemLists) {
+                    if ($candidateList -and $index -lt $candidateList.Count -and $candidateList[$index].Contains('items')) {
+                        , $candidateList[$index]['items']
+                    }
+                }
+            )
+            if (Merge-NavigationTocItems $item['items'] $childCandidates $ApiPrefix $Availability) { $changed = $true }
+        }
+    }
+    $changed
+}
+
+function Merge-SharedNavigationToc([string] $SiteRoot, [string] $WorkRoot, [string] $BuildDestination, [string] $ApiPath, [string] $DefaultView, $Views, $Availability) {
+    $tocPath = Join-Path $SiteRoot 'toc.json'
+    if (!(Test-Path -LiteralPath $tocPath -PathType Leaf)) { return }
+    $targetToc = Read-Json $tocPath
+    if (!$targetToc -or !$targetToc.Contains('items')) { return }
+    $candidateLists = @(
+        foreach ($view in $Views.Keys) {
+            if ($view -ceq $DefaultView) { continue }
+            $candidatePath = Join-Path $WorkRoot "$($Views[$view].directory)/$BuildDestination/toc.json"
+            if (!(Test-Path -LiteralPath $candidatePath -PathType Leaf)) { continue }
+            $candidateToc = Read-Json $candidatePath
+            if ($candidateToc -and $candidateToc.Contains('items')) { , $candidateToc['items'] }
+        }
+    )
+    if (!$candidateLists.Count) { return }
+    if (Merge-NavigationTocItems $targetToc['items'] $candidateLists "$ApiPath/" $Availability) {
+        Write-Json $tocPath $targetToc
+    }
+}

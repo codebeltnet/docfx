@@ -301,9 +301,13 @@ try {
         $root = if ($view -ceq $defaultView) { '""' } else { "/_frameworks/$directory" }
         '    ~^{0}$ {1};' -f [regex]::Escape($directory), $root
     }
-    Write-Json "$site/framework-views.json" ([ordered]@{ schemaVersion = 1; apiPath = "/$ApiPath/"; defaultView = $defaultView; viewOrder = @($views.Keys); views = $views })
+    $availability = Get-FrameworkPageAvailability $site $ApiPath $defaultView $views
+    Merge-SharedNavigationToc $site $work $buildDestination $ApiPath $defaultView $views $availability
+    $fallbackRoutes = Get-FrameworkNginxFallbackRules $defaultView $views
+    Write-Json "$site/framework-views.json" ([ordered]@{ schemaVersion = 1; apiPath = "/$ApiPath/"; defaultView = $defaultView; viewOrder = @($views.Keys); views = $views; availability = $availability })
     (Get-Content -LiteralPath "$PSScriptRoot/framework-views.nginx.conf" -Raw).Replace('__API__', "/$ApiPath/").
-        Replace('__VIEWS__', ($routes -join "`n")).Replace('__SEARCH__', ($searchRoutes -join "`n")) | Set-Content -LiteralPath "$work/nginx.conf"
+        Replace('__VIEWS__', ($routes -join "`n")).Replace('__SEARCH__', ($searchRoutes -join "`n")).
+        Replace('__FALLBACK__', ($fallbackRoutes -join "`n")) | Set-Content -LiteralPath "$work/nginx.conf"
     Write-Host "Site: $site"
 } finally {
     $outputLock.Dispose()

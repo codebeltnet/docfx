@@ -18,7 +18,7 @@ function Get-ApiPath($Metadata) {
         if (!$length) { throw 'Metadata destinations have no common API directory. Put all metadata.dest paths under one directory in docfx.json.' }
         $common = $common[0..($length - 1)]
     }
-    if ($common[0] -in 'public', '_frameworks', '_framework-search') {
+    if ($common[0] -in 'public', '_frameworks', '_framework-search', '_docfx-errors') {
         throw "Metadata destinations use the reserved directory '$($common[0])'. Choose a different API directory in docfx.json."
     }
     $common -join '/'
@@ -82,4 +82,129 @@ function Get-FrameworkOutputEntries([string] $Path, [string] $OwnershipFile, [st
     }
     $links = Get-ChildItem -LiteralPath $Path -Force -Recurse -Attributes ReparsePoint | Select-Object -First 1
     if ($links) { throw "Framework output contains a link. Move '$($links.FullName)' before rebuilding." }
+}
+
+function Get-FrameworkPageAvailability([string] $SiteRoot, [string] $ApiPath, [string] $DefaultView, $Views) {
+    $pageViews = [Collections.Generic.Dictionary[string, Collections.Generic.List[string]]]::new([StringComparer]::Ordinal)
+    foreach ($view in $Views.Keys) {
+        $viewApiRoot = if ($view -ceq $DefaultView) {
+            Join-Path $SiteRoot $ApiPath
+        } else {
+            Join-Path $SiteRoot "_frameworks/$($Views[$view].directory)/$ApiPath"
+        }
+        if (!(Test-Path -LiteralPath $viewApiRoot -PathType Container)) { continue }
+        foreach ($file in [IO.Directory]::EnumerateFiles($viewApiRoot, '*.html', [IO.SearchOption]::AllDirectories)) {
+            $relative = [IO.Path]::GetRelativePath($viewApiRoot, $file).Replace('\', '/')
+            if (!$pageViews.ContainsKey($relative)) {
+                $pageViews[$relative] = [Collections.Generic.List[string]]::new()
+            }
+            $pageViews[$relative].Add($view)
+        }
+    }
+
+    $setIndexes = [Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
+    $sets = [Collections.Generic.List[string[]]]::new()
+    $pages = [Collections.Specialized.OrderedDictionary]::new([StringComparer]::Ordinal)
+    $sortedKeys = [string[]]$pageViews.Keys
+    [Array]::Sort($sortedKeys, [StringComparer]::Ordinal)
+    foreach ($relative in $sortedKeys) {
+        $available = $pageViews[$relative].ToArray()
+        $key = $available -join ','
+        if (!$setIndexes.ContainsKey($key)) {
+            $setIndexes[$key] = $sets.Count
+            $sets.Add($available)
+        }
+        $pages[$relative] = $setIndexes[$key]
+    }
+    [ordered]@{ sets = $sets.ToArray(); pages = $pages }
+}
+
+function Get-FrameworkNginxFallbackRules([string] $DefaultView, $Views) {
+    foreach ($view in $Views.Keys) {
+        $prefix = if ($view -ceq $DefaultView) { '' } else { "/_frameworks/$($Views[$view].directory)" }
+        '        if (-f $document_root{0}$framework_fallback_target) {{ return 302 $uri?${{framework_query_prefix}}view={1}; }}' -f $prefix, $view
+    }
+}
+
+function Resolve-FrameworkApiRelativePage([string] $Href, [string] $ApiPrefix) {
+    if (!$Href) { return $null }
+    $normalized = ($Href -split '[?#]', 2)[0].TrimStart('/')
+    if (!$normalized.StartsWith($ApiPrefix, [StringComparison]::Ordinal)) { return $null }
+    $relative = $normalized.Substring($ApiPrefix.Length)
+    if (!$relative -or $relative.EndsWith('/')) { "${relative}index.html" } else { $relative }
+}
+
+function Get-NavigationTocIdentityHref([string] $Href) {
+    # DocFX can leave an API source link unresolved in one view and render it as HTML in another.
+    $Href -creplace '^/(?!/)', '' -creplace '^([^?#]+)\.yml(?=[?#]|$)', '$1.html'
+}
+
+function Merge-NavigationTocItems($TargetItems, $CandidateItemLists, [string] $ApiPrefix, $Availability) {
+    $changed = $false
+    if (!$TargetItems) { return $false }
+    foreach ($item in $TargetItems) {
+        $relative = Resolve-FrameworkApiRelativePage $item['href'] $ApiPrefix
+        $needsDestination = $relative -and !$Availability.pages.Contains($relative)
+        if (!$needsDestination -and !$item['items']) { continue }
+
+        $name = $item['name']
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $identityHref = Get-NavigationTocIdentityHref $item['href']
+        $sameIdentity = {
+            [string]::Equals($_['name'], $name, [StringComparison]::Ordinal) -and
+                [string]::Equals((Get-NavigationTocIdentityHref $_['href']), $identityHref, [StringComparison]::Ordinal)
+        }
+        if (@($TargetItems | Where-Object $sameIdentity).Count -ne 1) { continue }
+        $candidates = @(
+            foreach ($candidateList in $CandidateItemLists) {
+                if (!$candidateList) { continue }
+                $matchingItems = @($candidateList | Where-Object $sameIdentity)
+                if ($matchingItems.Count -eq 1) { $matchingItems[0] }
+            }
+        )
+
+        if ($needsDestination) {
+            foreach ($candidate in $candidates) {
+                $candidateHref = $candidate['href']
+                $candidateRelative = Resolve-FrameworkApiRelativePage $candidateHref $ApiPrefix
+                if ($candidateRelative -and $Availability.pages.Contains($candidateRelative)) {
+                    $item['href'] = $candidateHref
+                    foreach ($field in 'topicHref', 'tocHref') {
+                        if ($candidate.Contains($field)) { $item[$field] = $candidate[$field] }
+                    }
+                    $changed = $true
+                    break
+                }
+            }
+        }
+        if ($item['items']) {
+            $childCandidates = @(
+                foreach ($candidate in $candidates) {
+                    if ($candidate['items']) { , $candidate['items'] }
+                }
+            )
+            if (Merge-NavigationTocItems $item['items'] $childCandidates $ApiPrefix $Availability) { $changed = $true }
+        }
+    }
+    $changed
+}
+
+function Merge-SharedNavigationToc([string] $SiteRoot, [string] $WorkRoot, [string] $BuildDestination, [string] $ApiPath, [string] $DefaultView, $Views, $Availability) {
+    $tocPath = Join-Path $SiteRoot 'toc.json'
+    if (!(Test-Path -LiteralPath $tocPath -PathType Leaf)) { return }
+    $targetToc = Read-Json $tocPath
+    if (!$targetToc -or !$targetToc.Contains('items')) { return }
+    $candidateLists = @(
+        foreach ($view in $Views.Keys) {
+            if ($view -ceq $DefaultView) { continue }
+            $candidatePath = Join-Path $WorkRoot "$($Views[$view].directory)/$BuildDestination/toc.json"
+            if (!(Test-Path -LiteralPath $candidatePath -PathType Leaf)) { continue }
+            $candidateToc = Read-Json $candidatePath
+            if ($candidateToc -and $candidateToc.Contains('items')) { , $candidateToc['items'] }
+        }
+    )
+    if (!$candidateLists.Count) { return }
+    if (Merge-NavigationTocItems $targetToc['items'] $candidateLists "$ApiPath/" $Availability) {
+        Write-Json $tocPath $targetToc
+    }
 }

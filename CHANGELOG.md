@@ -4,10 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.1] - 2026-11-26
+
+This is a patch release that adds destination-aware framework view fallback routing and branded HTTP error pages with client-side recovery, expands unit, container, Playwright, and Cuemon acceptance tests, and enforces the six-tag versioned Docker image policy without `:latest`.
+
+### Added
+
+- Added destination-aware framework view fallback (`framework-views/FrameworkViewConventions.ps1`, `framework-views/Build-DocfxFrameworkViews.ps1`, `framework-views/framework-views.nginx.conf`, and `templates/ms-style/public/framework-view.js`), generating an ordinal-keyed, deduplicated `availability` inventory (`sets` and `pages`) in `framework-views.json`, merging missing API section links into shared root `toc.json` by item name and normalized identity href, routing unavailable HTML pages and directory indexes via NGINX HTTP `302` fallback (stripping `view` parameters while preserving other query parameters and returning HTTP `400` for excess duplicate `view` parameters), and resolving destination-aware links in `framework-view.js` across navigation, search results, and the framework selector,
+- Added branded HTTP error pages (`framework-views/DocfxHttpErrors.ps1`, `framework-views/http-error.md.tmpl`, `framework-views/http-error.js`, `framework-views/framework-views.nginx.conf`, `framework-views/Build-DocfxFrameworkViews.ps1`, and `framework-views/FrameworkViewConventions.ps1`), generating static DocFX error pages under `/_docfx-errors/` (reserving `_docfx-errors` in `Get-ApiPath`) for 19 HTTP status codes (`400`–`505`), routing HTML navigation errors to `/_docfx-errors/$status.html` and non-HTML requests to `@docfx_plain_error`, and serving isolated `public/docfx-http-error.js` recovery actions for documentation home, session-history back navigation, search, retry (including fresh `GET` navigation when URLs contain fragments), and `400`/`404` framework availability links,
+- Added expanded automated verification (`tests/framework-view/http-error.spec.js`, `tests/framework-view/framework-view.spec.js`, `tests/framework-view/FrameworkViewConventions.Tests.ps1`, `tests/framework-view/Build-DocfxFrameworkViews.Tests.ps1`, `tests/Test-DocfxContainer.ps1`, `tests/framework-view/Test-FrameworkView.ps1`, `tests/framework-view/Test-FrameworkViews.ps1`, `tests/framework-view/cuemon/Build-CuemonFixture.ps1`, `tests/framework-view/cuemon/Test-CuemonFrameworkViews.ps1`, and `tests/framework-view/fixture/`) covering destination-aware fallback, identity-based TOC merging, ordinal page availability keys, and branded HTTP error pages for multi-TFM and single-TFM sites.
 
 ### Changed
 
+- Updated repository documentation (`README.md`, `framework-views/README.md`, and `tests/framework-view/README.md`) to cover destination-aware framework view fallback, page availability metadata, shared root TOC merging, branded HTTP error pages, and the expanded browser and Cuemon acceptance tests,
 - Updated repository documentation (`README.md`, `framework-views/README.md`, `AGENTS.md`) and delivery tests (`tests/BuildAndPushDocfxImage.Tests.ps1`, `tests/ReleaseDelivery.Tests.ps1`) to document and enforce the six-tag versioned Docker image policy (three floating versioned convenience tags and three Codebelt engine-qualified tags).
 
 ### Removed
@@ -104,7 +113,7 @@ This is the initial release of the DocFX builder Docker image.
 - Added a DocFX builder Docker image that includes the default and modern templates,
 - Added support for running the DocFX build process in a container.
 
-[Unreleased]: https://github.com/codebeltnet/docfx/compare/v1.1.0..HEAD
+[1.1.1]: https://github.com/codebeltnet/docfx/compare/v1.1.0..v1.1.1
 [1.1.0]: https://github.com/codebeltnet/docfx/compare/v1.0.1..v1.1.0
 [1.0.1]: https://github.com/codebeltnet/docfx/compare/v1.0.0..v1.0.1
 [1.0.0]: https://github.com/codebeltnet/docfx/compare/v0.1.4..v1.0.0

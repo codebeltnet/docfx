@@ -120,12 +120,23 @@ switch ($args[0]) {
     }
     'build' {
         $stage = Split-Path -Parent $args[1]
-        $site = Join-Path $stage ((Get-Content -LiteralPath $args[1] -Raw | ConvertFrom-Json).build.dest)
+        $render = (Get-Content -LiteralPath $args[1] -Raw | ConvertFrom-Json).build
+        $site = Join-Path $stage $render.dest
         New-Item -ItemType Directory -Path "$site/api" | Out-Null
         New-Item -ItemType Directory -Path "$site/public" | Out-Null
+        $errors = $render.content | Where-Object dest -CEQ '_docfx-errors'
+        if ($errors) {
+            New-Item -ItemType Directory -Path "$site/$($errors.dest)" | Out-Null
+            foreach ($page in Get-ChildItem -LiteralPath "$stage/$($errors.src)" -Filter '*.md') {
+                @('<html><head><meta name="docfx:navrel" content="../toc.html"></head><body>',
+                  (Get-Content -LiteralPath $page.FullName -Raw), '</body></html>') |
+                    Set-Content -LiteralPath "$site/$($errors.dest)/$($page.BaseName).html"
+            }
+        }
         'Fixture.Library' | Set-Content -LiteralPath "$site/api/Library.html"
         'references: []' | Set-Content -LiteralPath "$site/xrefmap.yml"
         '{}' | Set-Content -LiteralPath "$site/index.json"
+        Copy-Item -LiteralPath "$stage/framework-template/ms-style/public/framework-view.js" -Destination "$site/public/"
         $asset = if ($scenario -eq 'different shared assets') { Split-Path -Leaf $stage } else { 'shared' }
         $asset | Set-Content -LiteralPath "$site/public/shared.js"
     }
@@ -143,7 +154,22 @@ switch ($args[0]) {
     It 'continues through rendering on ordinary warnings and skips metadata on a warm cache' {
         & $build -DocfxConfig $config -OutputRoot $output -MetadataCache $cache -MetadataCacheKey 'fixture'
         Test-Path -LiteralPath "$output/site/api/Library.html" | Should -BeTrue
-        (Get-Content -LiteralPath "$output/site/framework-views.json" -Raw | ConvertFrom-Json).defaultView | Should -BeExactly 'net-11.0'
+        $manifest = Get-Content -LiteralPath "$output/site/framework-views.json" -Raw | ConvertFrom-Json -AsHashtable
+        $manifest.defaultView | Should -BeExactly 'net-11.0'
+        $manifest.availability.sets[$manifest.availability.pages['Library.html']] | Should -BeExactly @('net-11.0', 'net-10.0')
+        $nginx = Get-Content -LiteralPath "$output/nginx.conf" -Raw
+        $nginx | Should -Not -Match '__(API|VIEWS|SEARCH|FALLBACK|ERROR_STATUS)__'
+        $nginx | Should -Match 'location @framework_fallback'
+        $nginx | Should -Match 'error_page 400 401 403 404 405 .* 429 500 501 502 503 504 .*\$docfx_error_target;'
+        $errorPage = Get-Content -LiteralPath "$output/site/_docfx-errors/404.html" -Raw
+        $errorPage | Should -Match '<base href="/_docfx-errors/">'
+        $errorPage | Should -Match '<meta name="docfx:navrel" content="/toc.html">'
+        $errorPage | Should -Match 'data-status="404"'
+        $errorPage | Should -Match '_noindex: true'
+        $errorPage | Should -Match '<h1>Not Found</h1>'
+        $errorPage | Should -Match 'data-api-path="/api/"'
+        $errorPage | Should -Not -Match '__(STATUS|HEADING|MESSAGE|API_PATH)__'
+        Test-Path -LiteralPath "$output/net10/_site/_docfx-errors" | Should -BeFalse
         @(Get-ChildItem -LiteralPath $cache -Filter '*.zip' -Recurse).Count | Should -Be 2
         & $build -DocfxConfig $config -OutputRoot $output -MetadataCache $cache -MetadataCacheKey 'fixture'
         @(Select-String -LiteralPath "$fixture/docfx.log" -Pattern '^metadata .* --noRestore$').Count | Should -Be 2
@@ -174,6 +200,7 @@ switch ($args[0]) {
         & $build -DocfxConfig $config -OutputRoot $output -NoRestore
         Test-Path -LiteralPath "$output/net11/docs-output/api/Library.html" | Should -BeTrue
         Test-Path -LiteralPath "$output/net10" | Should -BeFalse
+        Test-Path -LiteralPath "$output/site/_docfx-errors/404.html" | Should -BeTrue
         Get-Content -LiteralPath "$fixture/dotnet.log" -Raw | Should -Not -Match '(?m)^restore '
     }
 

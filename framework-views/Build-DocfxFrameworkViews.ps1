@@ -13,6 +13,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 . "$PSScriptRoot/FrameworkViewConventions.ps1"
 . "$PSScriptRoot/DocfxMetadata.ps1"
+. "$PSScriptRoot/DocfxHttpErrors.ps1"
 
 function Invoke-Step([string] $Log, [string] $Command, [string[]] $Arguments, [switch] $ReturnExitCode) {
     & $Command @Arguments *> $Log
@@ -194,6 +195,7 @@ try {
             New-Item -ItemType Directory -Path $cacheRoot -Force | Out-Null
         }
         $restored = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        $defaultView = @($views.Keys)[0]
         foreach ($view in $views.Keys) {
             $entry = $views[$view]
             $tfm = $entry.tfm
@@ -263,6 +265,7 @@ try {
             })
             New-Item -ItemType Directory -Path "$stage/framework-template" | Out-Null
             Copy-Item -LiteralPath $templateSource -Destination "$stage/framework-template/ms-style" -Recurse
+            if ($view -ceq $defaultView) { $errorStatuses = @(New-DocfxHttpErrors $stage $build $ApiPath) }
             Write-Json "$stage/framework-build.json" @{ build = $build }
             Invoke-Step "$stage/build.log" $docfx @('build', "$stage/framework-build.json")
             Write-Host "$view rendered $count metadata UIDs"
@@ -271,7 +274,6 @@ try {
         Pop-Location
     }
 
-    $defaultView = @($views.Keys)[0]
     $site = "$work/site"
     Copy-Item -LiteralPath "$work/$($views[$defaultView].directory)/$buildDestination" -Destination $site -Recurse
     $routes = foreach ($view in $views.Keys) {
@@ -301,9 +303,15 @@ try {
         $root = if ($view -ceq $defaultView) { '""' } else { "/_frameworks/$directory" }
         '    ~^{0}$ {1};' -f [regex]::Escape($directory), $root
     }
-    Write-Json "$site/framework-views.json" ([ordered]@{ schemaVersion = 1; apiPath = "/$ApiPath/"; defaultView = $defaultView; viewOrder = @($views.Keys); views = $views })
+    $availability = Get-FrameworkPageAvailability $site $ApiPath $defaultView $views
+    Merge-SharedNavigationToc $site $work $buildDestination $ApiPath $defaultView $views $availability
+    $fallbackRoutes = Get-FrameworkNginxFallbackRules $defaultView $views
+    Write-Json "$site/framework-views.json" ([ordered]@{ schemaVersion = 1; apiPath = "/$ApiPath/"; defaultView = $defaultView; viewOrder = @($views.Keys); views = $views; availability = $availability })
+    Complete-DocfxHttpErrors $site $errorStatuses
     (Get-Content -LiteralPath "$PSScriptRoot/framework-views.nginx.conf" -Raw).Replace('__API__', "/$ApiPath/").
-        Replace('__VIEWS__', ($routes -join "`n")).Replace('__SEARCH__', ($searchRoutes -join "`n")) | Set-Content -LiteralPath "$work/nginx.conf"
+        Replace('__VIEWS__', ($routes -join "`n")).Replace('__SEARCH__', ($searchRoutes -join "`n")).
+        Replace('__FALLBACK__', ($fallbackRoutes -join "`n")).
+        Replace('__ERROR_STATUS__', ($errorStatuses -join ' ')) | Set-Content -LiteralPath "$work/nginx.conf"
     Write-Host "Site: $site"
 } finally {
     $outputLock.Dispose()

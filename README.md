@@ -4,6 +4,8 @@ This repository distributes the DocFX builder image, shared templates and native
 
 Framework views generate one native set of API pages, xrefs and search results per evaluated project target framework. From the consumer repository root, the generator reads `.docfx/docfx.json` and writes to `.bot/docfx`. The same PowerShell entry point runs on Windows, Linux, CI and in the builder image. Ordinary DocFX sites continue to use the standard CLI. [Framework views setup and migration](framework-views/README.md)
 
+Sites served by the generated NGINX configuration automatically get branded HTTP error pages, including sites that target a single framework. [HTTP error pages](framework-views/README.md#http-error-pages)
+
 Consuming repositories only need to provide their DocFX metadata and content with a command such as `ADD [".", "docfx"]` in their documentation Dockerfile.
 
 The image includes DocFX's `default` and `modern` templates and the Codebelt `ms-style` compatibility overlay. The overlay is intended for API reference sites maintained by the Codebelt ecosystem, including:

@@ -4,3 +4,7 @@
   href: api/runtime/FrameworkFixture.Runtime.yml
 - name: Utilities API
   href: api/utilities/FrameworkFixture.Utilities.yml
+- name: Modern API
+  href: api/modern/FrameworkFixture.ModernApi.yml
+- name: Standard API
+  href: api/standard/FrameworkFixture.StandardApi.yml

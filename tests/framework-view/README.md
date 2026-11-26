@@ -6,7 +6,7 @@ Use PowerShell 7 on the host. The native and browser suites also require the .NE
 
 ## Unit tests and coverage
 
-Run with Pester 5. Measure all three PowerShell implementation files so the report includes the generator entry point. The unit tests exercise preflight checks, framework conventions, output ownership, and metadata recovery and publication with the external commands mocked. The native and packaged suites below exercise real project discovery, MSBuild, DocFX, cache reuse, rendering and packaging.
+Run with Pester 5. Measure the PowerShell files under `framework-views/` so the report includes the generator entry point. The unit tests exercise preflight checks, framework conventions, output ownership, error-page generation, and metadata recovery and publication with the external commands mocked. The native and packaged suites below exercise real project discovery, MSBuild, DocFX, cache reuse, rendering and packaging.
 
 ```powershell
 $configuration = New-PesterConfiguration
@@ -36,6 +36,8 @@ pwsh -NoProfile -File tests/framework-view/Test-FrameworkView.ps1 -ContainerOnly
 ```
 
 The complete suite also runs the generator natively and compares the runtime manifest and routing with the container build. It serves the native output and an ordinary single-framework site with the shared NGINX Dockerfile. The browser and HTTP checks cover the selector, UID and fragment resolution, unified default and non-default fallback precedence, global navigation, TOCs, breadcrumbs, cross-references, ordinary internal API hyperlinks, new-tab opening without click interception, JavaScript-disabled navigation, browser history, query parameter and fragment preservation, genuine 404s, invalid-view 400s, strict TOC/xref/search isolation, and mobile keyboard operation.
+
+The error-page checks run against the generated NGINX configuration for both multi-TFM and single-TFM fixtures. They cover local error statuses and headers, deep URLs and refresh, theme and search behavior, framework recovery, navigation history, missing assets and metadata, and core recovery without JavaScript.
 
 ```powershell
 Push-Location tests/framework-view

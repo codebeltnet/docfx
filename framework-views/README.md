@@ -86,6 +86,16 @@ docker build -f /path/to/docfx/framework-views/framework-views.Dockerfile -t my-
 docker run --rm -p 127.0.0.1:8080:8080 my-docs:local
 ```
 
+### HTTP error pages
+
+The generator renders branded error documents with the site's configured DocFX templates and packages them under the internal `/_docfx-errors/` directory. The generated NGINX configuration serves them automatically for document requests, even when the build has only one target framework. It keeps the original HTTP status and serves a short response for missing assets and other non-document requests. The error documents are excluded from the search index.
+
+The error page provides a documentation home link and expandable HTTP status details without JavaScript. With JavaScript, it shows the requested path, uses the site's saved theme, and offers the existing DocFX search when available. **Go back** checks the last successful documentation page recorded for the browser tab and falls back to the documentation home. The session record keeps the path and applicable framework view. **Retry** opens the original URL with a fresh GET for transient server errors.
+
+The usual automatic framework fallback takes precedence. If a request still fails and the framework inventory identifies that API page, the error page can show the selected framework and link to the available views in engine order. It checks that each destination responds directly before offering it and marks the default when available. Missing framework metadata leaves the standard recovery actions available.
+
+The feature applies to errors handled by the documentation site's generated NGINX configuration. When NGINX closes a timed-out connection before sending an HTTP response, the browser handles the connection failure. Sites built with the standard DocFX CLI and served through their own configuration use their host's error handling. Cloudflare, ingress controllers, load balancers and unavailable containers can respond before the request reaches the documentation server and control their own error pages.
+
 ## OCI action integration
 
 Use an updated action and compatible builder image. Pin the action by full release commit SHA. Add these inputs alongside the existing version, revision and output inputs. [DocFX OCI build action](https://github.com/codebeltnet/docfx-oci-build)

@@ -134,18 +134,38 @@ function Resolve-FrameworkApiRelativePage([string] $Href, [string] $ApiPrefix) {
     if (!$relative -or $relative.EndsWith('/')) { "${relative}index.html" } else { $relative }
 }
 
+function Get-NavigationTocIdentityHref([string] $Href) {
+    # DocFX can leave an API source link unresolved in one view and render it as HTML in another.
+    $Href -creplace '^/(?!/)', '' -creplace '^([^?#]+)\.yml(?=[?#]|$)', '$1.html'
+}
+
 function Merge-NavigationTocItems($TargetItems, $CandidateItemLists, [string] $ApiPrefix, $Availability) {
     $changed = $false
     if (!$TargetItems) { return $false }
-    for ($index = 0; $index -lt $TargetItems.Count; $index++) {
-        $item = $TargetItems[$index]
-        $href = if ($item.Contains('href')) { $item['href'] }
-        $relative = Resolve-FrameworkApiRelativePage $href $ApiPrefix
-        if ($relative -and !$Availability.pages.Contains($relative)) {
+    foreach ($item in $TargetItems) {
+        $relative = Resolve-FrameworkApiRelativePage $item['href'] $ApiPrefix
+        $needsDestination = $relative -and !$Availability.pages.Contains($relative)
+        if (!$needsDestination -and !$item['items']) { continue }
+
+        $name = $item['name']
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $identityHref = Get-NavigationTocIdentityHref $item['href']
+        $sameIdentity = {
+            [string]::Equals($_['name'], $name, [StringComparison]::Ordinal) -and
+                [string]::Equals((Get-NavigationTocIdentityHref $_['href']), $identityHref, [StringComparison]::Ordinal)
+        }
+        if (@($TargetItems | Where-Object $sameIdentity).Count -ne 1) { continue }
+        $candidates = @(
             foreach ($candidateList in $CandidateItemLists) {
-                if (!$candidateList -or $index -ge $candidateList.Count) { continue }
-                $candidate = $candidateList[$index]
-                $candidateHref = if ($candidate.Contains('href')) { $candidate['href'] }
+                if (!$candidateList) { continue }
+                $matchingItems = @($candidateList | Where-Object $sameIdentity)
+                if ($matchingItems.Count -eq 1) { $matchingItems[0] }
+            }
+        )
+
+        if ($needsDestination) {
+            foreach ($candidate in $candidates) {
+                $candidateHref = $candidate['href']
                 $candidateRelative = Resolve-FrameworkApiRelativePage $candidateHref $ApiPrefix
                 if ($candidateRelative -and $Availability.pages.Contains($candidateRelative)) {
                     $item['href'] = $candidateHref
@@ -157,12 +177,10 @@ function Merge-NavigationTocItems($TargetItems, $CandidateItemLists, [string] $A
                 }
             }
         }
-        if ($item.Contains('items') -and $item['items']) {
+        if ($item['items']) {
             $childCandidates = @(
-                foreach ($candidateList in $CandidateItemLists) {
-                    if ($candidateList -and $index -lt $candidateList.Count -and $candidateList[$index].Contains('items')) {
-                        , $candidateList[$index]['items']
-                    }
+                foreach ($candidate in $candidates) {
+                    if ($candidate['items']) { , $candidate['items'] }
                 }
             )
             if (Merge-NavigationTocItems $item['items'] $childCandidates $ApiPrefix $Availability) { $changed = $true }

@@ -88,6 +88,23 @@ test('missing framework metadata leaves standard actions available', async ({ pa
     await expect(page).toHaveURL('/');
 });
 
+test('error recovery works with a compatible template that requires framework metadata', async ({ page }) => {
+    const scriptErrors = [];
+    page.on('pageerror', error => scriptErrors.push(error.message));
+    await page.route('**/public/framework-view.js', async route => {
+        const response = await route.fetch();
+        const script = await response.text();
+        await route.fulfill({
+            response,
+            body: `document.querySelector('meta[name="docfx:framework-api"]').content;\n${script}`
+        });
+    });
+
+    expect((await page.goto(missing)).status()).toBe(404);
+    await expect(back(page)).toBeVisible({ timeout: 3000 });
+    expect(scriptErrors).toEqual([]);
+});
+
 test('themes and search work on a narrow viewport', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 740 });
     await page.emulateMedia({ colorScheme: 'dark' });
@@ -167,6 +184,43 @@ test('retry is explicit and opens the original URL', async ({ page }) => {
     expect((await navigation).status()).toBe(503);
     await expect(page).toHaveURL(url);
 });
+
+for (const method of ['GET', 'POST']) {
+    test(`retry makes a fresh GET and keeps the fragment after a failed ${method}`, async ({ page }) => {
+        const path = '/_status/503.html?source=retry&tag=a%20b&tag=c';
+        const url = path + '#members';
+        const requests = [];
+        await page.route(target => target.pathname === '/_status/503.html', async route => {
+            const request = route.request();
+            const target = new URL(request.url());
+            requests.push([request.method(), target.pathname + target.search]);
+            if (requests.length === 1) {
+                await route.fulfill({ response: await route.fetch({ method: 'GET' }) });
+            } else {
+                await route.fulfill({ contentType: 'text/html', body: '<h1 id="members">Recovered</h1>' });
+            }
+        });
+
+        if (method === 'POST') {
+            await page.goto('/');
+            await page.evaluate(url => {
+                const form = document.createElement('form');
+                form.action = url;
+                form.method = 'POST';
+                document.body.append(form);
+                form.submit();
+            }, url);
+        } else {
+            await page.goto(url);
+        }
+        await expect(heading(page, 'Service Unavailable')).toBeVisible();
+        await expect(page).toHaveURL(url);
+        await page.getByRole('button', { name: 'Retry' }).click();
+        await expect(heading(page, 'Recovered')).toBeVisible({ timeout: 3000 });
+        expect(requests).toEqual([[method, path], ['GET', path]]);
+        await expect(page).toHaveURL(url);
+    });
+}
 
 test('the generated server brands errors for sites with a single TFM', async ({ page, request }) => {
     const origin = process.env.DOCFX_TEST_SINGLE_ORIGIN;

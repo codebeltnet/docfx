@@ -18,7 +18,7 @@ function Get-ApiPath($Metadata) {
         if (!$length) { throw 'Metadata destinations have no common API directory. Put all metadata.dest paths under one directory in docfx.json.' }
         $common = $common[0..($length - 1)]
     }
-    if ($common[0] -in 'public', '_frameworks', '_framework-search') {
+    if ($common[0] -in 'public', '_frameworks', '_framework-search', '_docfx-errors') {
         throw "Metadata destinations use the reserved directory '$($common[0])'. Choose a different API directory in docfx.json."
     }
     $common -join '/'

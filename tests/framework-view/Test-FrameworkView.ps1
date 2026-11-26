@@ -13,7 +13,9 @@ $repo = (Resolve-Path -LiteralPath "$PSScriptRoot/../..").Path
 $work = Join-Path ([IO.Path]::GetTempPath()) "docfx-browser-$([guid]::NewGuid().ToString('N'))"
 $output = "$work/output"
 $container = $null
+$singleContainer = $null
 $previousOrigin = $env:DOCFX_TEST_ORIGIN
+$previousSingleOrigin = $env:DOCFX_TEST_SINGLE_ORIGIN
 
 function Copy-Fixture([string] $Destination) {
     Copy-Item -LiteralPath "$PSScriptRoot/fixture" -Destination $Destination -Recurse
@@ -66,7 +68,7 @@ function Test-PackagedGenerator {
     }
     $nginx = Get-Content -LiteralPath "$destination/nginx.conf" -Raw
     if (!$nginx.Contains('location ^~ /api/') -or !$nginx.Contains('location @framework_fallback') -or
-        $nginx -match '__(API|VIEWS|SEARCH|FALLBACK)__') {
+        $nginx -match '__(API|VIEWS|SEARCH|FALLBACK|ERROR_STATUS)__') {
         throw 'The packaged generator did not configure the API and fallback routes.'
     }
     $widget = 'api/runtime/FrameworkFixture.Runtime.Widget.html'
@@ -120,7 +122,7 @@ try {
     Copy-Fixture "$work/fixture"
     $docs = "$work/fixture/.docfx"
     & "$repo/framework-views/Build-DocfxFrameworkViews.ps1" -DocfxConfig "$docs/docfx.json" -OutputRoot $output
-    foreach ($path in 'site/framework-views.json', 'nginx.conf') {
+    foreach ($path in 'site/framework-views.json', 'site/_docfx-errors/404.html', 'nginx.conf') {
         $native = (Get-Content -LiteralPath "$output/$path" -Raw).Replace("`r`n", "`n")
         $packaged = (Get-Content -LiteralPath "$work/container-fixture/.bot/docfx/$path" -Raw).Replace("`r`n", "`n")
         if ($native -cne $packaged) { throw "Native and packaged generation differ for '$path'." }
@@ -136,6 +138,20 @@ try {
     docker run --rm --mount "type=bind,source=$single,target=/stage" -w /stage $BuilderImage docfx build docfx.json
     Copy-Item -LiteralPath "$single/_site" -Destination "$output/site/single" -Recurse
 
+    # Run the same generated server against a site whose projects declare only one TFM.
+    $singleFixture = "$work/single-framework"
+    $singleOutput = "$work/single-output"
+    Copy-Fixture $singleFixture
+    $props = "$singleFixture/Directory.Build.props"
+    (Get-Content -LiteralPath $props -Raw).Replace(
+        '<TargetFrameworks>net11.0;net10.0;netstandard2.1;netstandard2.0;net48</TargetFrameworks>',
+        '<TargetFramework>net11.0</TargetFramework>') | Set-Content -LiteralPath $props
+    $singleConfig = "$singleFixture/.docfx/docfx.json"
+    $config = Get-Content -LiteralPath $singleConfig -Raw | ConvertFrom-Json -AsHashtable
+    $config.metadata = @($config.metadata[0])
+    $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $singleConfig
+    & "$repo/framework-views/Build-DocfxFrameworkViews.ps1" -DocfxConfig $singleConfig -OutputRoot $singleOutput
+
     $imageContext = "$work/image"
     New-Item -ItemType Directory -Path $imageContext | Out-Null
     Move-Item -LiteralPath "$output/site", "$output/nginx.conf" -Destination $imageContext
@@ -145,7 +161,32 @@ try {
         $imageContext
     )
     $siteImage = docker build @buildArguments
-    $container = docker run --rm -d -p 127.0.0.1::8080 $siteImage
+    $runtimeImage = if ($NginxImage) { $NginxImage } else { $siteImage }
+    $singleContainer = docker run --rm -d -p 127.0.0.1::8080 `
+        --mount "type=bind,source=$singleOutput/site,target=/usr/share/nginx/html,readonly" `
+        --mount "type=bind,source=$singleOutput/nginx.conf,target=/etc/nginx/conf.d/default.conf,readonly" $runtimeImage
+    $env:DOCFX_TEST_SINGLE_ORIGIN = "http://$((docker port $singleContainer 8080/tcp).Trim())"
+
+    # Trigger otherwise uncommon local errors without adding production routes.
+    $testConfig = "$work/nginx-test.conf"
+    $routes = @'
+    add_header Allow $test_allow always;
+    add_header Retry-After $test_retry_after always;
+    location = /_status/401.html {
+        auth_basic "Fixture documentation";
+        auth_basic_user_file /dev/null;
+    }
+'@
+    foreach ($status in 400, 403, 405, 410, 429, 500, 502, 503, 504) {
+        $routes += "`n    location = /_status/$status.html { return $status; }"
+    }
+    @'
+map $status $test_allow { default ""; 405 "GET, HEAD"; }
+map $status $test_retry_after { default ""; 429 30; 503 60; }
+'@ + "`n" + (Get-Content -LiteralPath "$imageContext/nginx.conf" -Raw).Replace('server {', "server {`n$routes`n") |
+        Set-Content -LiteralPath $testConfig
+    $container = docker run --rm -d -p 127.0.0.1::8080 `
+        --mount "type=bind,source=$testConfig,target=/etc/nginx/conf.d/default.conf,readonly" $siteImage
     $endpoint = (docker port $container 8080/tcp).Trim()
     $env:DOCFX_TEST_ORIGIN = "http://$endpoint"
     Push-Location $PSScriptRoot
@@ -156,6 +197,8 @@ try {
     }
 } finally {
     $env:DOCFX_TEST_ORIGIN = $previousOrigin
+    $env:DOCFX_TEST_SINGLE_ORIGIN = $previousSingleOrigin
     if ($container) { docker stop $container | Out-Null }
+    if ($singleContainer) { docker stop $singleContainer | Out-Null }
     Write-Host "Fixture artifacts: $work"
 }

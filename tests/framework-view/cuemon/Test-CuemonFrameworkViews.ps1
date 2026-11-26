@@ -169,8 +169,10 @@ try {
     $aspnetDefault = Get-Page "$($aspnetPath)?view=net-11.0" 200 'text/html'
     Assert-True ($aspnetDefault.Contains('Cuemon.AspNetCore')) 'Resolved Cuemon.AspNetCore page missing expected content.'
     Get-Page "$($aspnetPath)?view=net-10.0" 200 'text/html' | Out-Null
-    Get-Page '/api/aspnet/DoesNotExist.html?view=netstandard-2.0' 404 | Out-Null
-    Get-Page '/api/aspnet/toc.json?view=netstandard-2.0' 404 | Out-Null
+    $notFound = Get-Page '/api/aspnet/DoesNotExist.html?view=netstandard-2.0' 404 'text/html'
+    Assert-True ($notFound.Contains('<h1>Not Found</h1>') -and $notFound.Contains('data-api-path="/api/"')) 'The document 404 did not render the Cuemon error page.'
+    Assert-True ($notFound.Contains('Cuemon for .NET') -and $notFound.Contains('images/50x50.png') -and $notFound.Contains('Copyright 2008-2026 Geekle')) 'The document 404 lost the configured Cuemon branding.'
+    Get-Page '/api/aspnet/toc.json?view=netstandard-2.0' 404 'text/plain' | Out-Null
     Get-Page "$dotnetApi$legacy.html" 302 $null "$dotnetApi$legacy.html?view=netstandard-2.0" | Out-Null
     Get-Page "$dotnetApi$legacy.html?view=net-11.0" 302 $null "$dotnetApi$legacy.html?view=netstandard-2.0" | Out-Null
     Get-Page "$dotnetApi$buffer.html?view=netstandard-2.0" 302 $null "$dotnetApi$buffer.html?view=net-11.0" | Out-Null

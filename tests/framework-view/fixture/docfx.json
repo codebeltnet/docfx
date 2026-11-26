@@ -24,6 +24,7 @@
   "build": {
     "content": [{ "files": ["api/**/*.yml", "index.md", "toc.yml"] }],
     "globalMetadata": {
+      "_appName": "Framework Fixture",
       "_enableSearch": true,
       "_disableContribution": true
     },

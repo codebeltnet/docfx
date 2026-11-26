@@ -101,6 +101,9 @@ $requiredFiles = @(
     '/opt/docfx/framework-views/Build-DocfxFrameworkViews.ps1',
     '/opt/docfx/framework-views/FrameworkViewConventions.ps1',
     '/opt/docfx/framework-views/DocfxMetadata.ps1',
+    '/opt/docfx/framework-views/DocfxHttpErrors.ps1',
+    '/opt/docfx/framework-views/http-error.md.tmpl',
+    '/opt/docfx/framework-views/http-error.js',
     '/opt/docfx/framework-views/Resolve-DocfxProjects.cs',
     '/opt/docfx/framework-views/KeepCrossTargetReferences.targets',
     '/opt/docfx/framework-views/framework-views.nginx.conf',
@@ -166,7 +169,8 @@ try {
 
     $nginx = Get-Content -LiteralPath (Join-Path $destination 'nginx.conf') -Raw
     if (-not $nginx.Contains('location ^~ /api/') -or -not $nginx.Contains('location @framework_fallback') -or
-        $nginx -match '__(API|VIEWS|SEARCH|FALLBACK)__') {
+        $nginx -match '__(API|VIEWS|SEARCH|FALLBACK|ERROR_STATUS)__' -or
+        !(Test-Path -LiteralPath (Join-Path $destination 'site/_docfx-errors/404.html') -PathType Leaf)) {
         throw 'Generated NGINX configuration is incomplete or contains unsubstituted placeholders.'
     }
 

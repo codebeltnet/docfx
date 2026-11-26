@@ -219,15 +219,15 @@ if ($TestRouting) {
             @{ path = "/reference/runtime/?view=$otherView"; status = 200; body = 'other API index' }
             @{ path = "/reference/runtime/index.html?view=$otherView"; status = 200; body = 'other API index' }
             @{ path = "/reference/runtime/FrameworkFixture.Common.html?view=$otherView"; status = 200; body = 'FrameworkFixture' }
-            @{ path = '/reference/runtime/?view=unknown'; status = 400; body = 'Unknown documentation view.' }
+            @{ path = '/reference/runtime/?view=unknown'; status = 400; body = '<h1>Bad Request</h1>' }
             @{ path = "/reference/runtime/FrameworkFixture.Modern.html?view=$otherView"; status = 302; location = "/reference/runtime/FrameworkFixture.Modern.html?view=$defaultView" }
             @{ path = "/reference/runtime/FrameworkFixture.Modern.html?tag=a&view=$otherView&tag=b"; status = 302; location = "/reference/runtime/FrameworkFixture.Modern.html?tag=a&tag=b&view=$defaultView" }
             @{ path = "/reference/runtime/FrameworkFixture.Modern.html?tag=a&VIEW=$otherView&view=$otherView&tag=b"; status = 302; location = "/reference/runtime/FrameworkFixture.Modern.html?tag=a&tag=b&view=$defaultView" }
-            @{ path = "/reference/runtime/FrameworkFixture.Modern.html?view=$otherView&view=$otherView&view=$otherView"; status = 400; body = 'Unknown documentation view.' }
+            @{ path = "/reference/runtime/FrameworkFixture.Modern.html?view=$otherView&view=$otherView&view=$otherView"; status = 400; body = '<h1>Bad Request</h1>' }
             @{ path = '/reference/legacy/'; status = 302; location = "/reference/legacy/?view=$otherView" }
             @{ path = "/reference/legacy/?view=$otherView"; status = 200; body = 'other legacy index' }
             @{ path = "/reference/legacy/FrameworkFixture.Compatibility.Legacy.html?view=$defaultView"; status = 302; location = "/reference/legacy/FrameworkFixture.Compatibility.Legacy.html?view=$otherView" }
-            @{ path = "/reference/runtime/DoesNotExist.html?view=$otherView"; status = 404 }
+            @{ path = "/reference/runtime/DoesNotExist.html?view=$otherView"; status = 404; body = '<h1>Not Found</h1>' }
             @{ path = '/reference/legacy/toc.json'; status = 404 }
             @{ path = '/reference/runtime/missing.png'; status = 404 }
         )

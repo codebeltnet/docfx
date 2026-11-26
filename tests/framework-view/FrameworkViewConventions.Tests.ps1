@@ -19,6 +19,7 @@ Describe 'Framework view conventions' {
             { Get-ApiPath @(@{ dest = $pair[0] }, @{ dest = $pair[1] }) } | Should -Throw '*no common API directory*'
         }
         { Get-ApiPath @(@{ dest = '_frameworks/api' }) } | Should -Throw '*reserved directory*'
+        { Get-ApiPath @(@{ dest = '_docfx-errors/api' }) } | Should -Throw '*reserved directory*'
     }
 
     It 'orders framework families and numeric versions independently of discovery order' {

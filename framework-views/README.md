@@ -28,14 +28,20 @@ The generator uses the deepest common directory of the `metadata.dest` paths as 
 
 DocFX owns project mappings, filters, exclusions, overwrites and other metadata options. MSBuild supplies each mapped project's evaluated target frameworks, including inherited values. Remove any `TargetFramework` metadata property so the generator can choose the target per view. A project contributes documentation only to its evaluated targets. Unsupported TFMs, including platform-qualified TFMs, fail with the project path and the target in the diagnostic.
 
-The default view is the first discovered target in this order. The same order determines fallback precedence.
+The default view is the first discovered target in this order. The same order determines fallback precedence everywhere (hyperlinks, framework selector, and server-side HTTP routing):
 
 1. Modern .NET, by descending numeric version
 2. .NET Core, by descending numeric version
 3. .NET Standard, by descending numeric version
 4. .NET Framework, by descending numeric version
 
-For example, the order is `net11.0`, `net10.0`, `net9.0`, `netcoreapp3.1`, `netstandard2.1`, `netstandard2.0`, `net481`, `net48`, `net462`. New unqualified versions follow the same rules when the installed SDK and DocFX support them.
+For example, the order is `net11.0`, `net10.0`, `netstandard2.1`, `netstandard2.0`, `net481`, `net48`, `net462`. New unqualified versions follow the same rules when the installed SDK and DocFX support them.
+
+The selected framework is treated as a preference rather than an unconditional routing constraint:
+
+- Whenever a destination API page exists in the requested framework, that framework is preserved.
+- Whenever a destination API page does not exist in the requested framework, resolution selects the first framework in precedence order that contains the destination (whether that target is the default framework or a non-default framework).
+- Pages that do not exist in any framework return HTTP 404, and unknown framework identifiers return HTTP 400.
 
 Keep build content, resources, and consumer template overlays under the configuration directory. Project sources can sit outside it. Omit a site-local entry from `build.xref` if it can resolve UIDs from another view. Duplicate UIDs within a view have the same constraints as a standard DocFX build.
 
@@ -67,9 +73,10 @@ docker run --rm --mount "type=bind,source=$($PWD.Path),target=/workspace" -w /wo
 
 ## Outputs and hosting
 
-- `<OutputRoot>/site/` is the packaged static site. The default view is at the site root. Additional views retain native API HTML, xrefs and search indexes in `_frameworks/<directory>/`. Shared conceptual pages and assets are published once.
-- `<OutputRoot>/site/framework-views.json` is the schema-version-1 manifest served at `/framework-views.json`. It contains the API root, default view, framework order, and per-view TFM, directory, xref URL and projects.
-- `<OutputRoot>/nginx.conf` serves the public API path and native xref map by exact `?view=` value. Missing or empty view uses the default. Unknown API or xref views receive HTTP 400. Missing pages or slash-terminated directory indexes in a known view receive HTTP 404. The browser selector resolves fallback before navigating. The configuration also serves the view-specific search indexes and keeps physical framework copies internal.
+- `<OutputRoot>/site/` is the packaged static site. The default view is at the site root. Additional views retain native API HTML, xrefs and search indexes in `_frameworks/<directory>/`. Shared conceptual pages and assets are published once. When shared root navigation (`toc.json`) references an API section absent from the default view, the generator merges its resolved HTML link from the first view in precedence order where it exists.
+- `<OutputRoot>/site/framework-views.json` is the schema-version-1 manifest served at `/framework-views.json`. It contains the API root, default view, framework order, per-view TFM, directory, xref URL and projects, and a compact deduplicated `availability` inventory (`sets` and `pages`) derived from the actual generated native DocFX HTML output.
+- `<OutputRoot>/nginx.conf` serves the public API path and native xref map by exact `?view=` value. Missing or empty view uses the default. Unknown API or xref views (or excess duplicate `view` parameters) receive HTTP 400. For HTML pages and `/`-terminated directory indexes under the API root that are unavailable in the requested view, NGINX checks the generated framework directories in precedence order and responds with HTTP 302 to the resolved public URL (`?view=<resolved>`), preserving unrelated query parameters while browsers preserve fragments. Pages missing from all views, non-HTML API resources (such as view-isolated `toc.json` files or missing static files), and direct requests under `/_frameworks/` receive HTTP 404 without redirecting. The configuration also serves view-specific search indexes and keeps physical framework copies internal.
+- The `ms-style` client script (`public/framework-view.js`) applies the same destination-aware resolution policy across global navigation, TOCs, breadcrumbs, cross-references, search results, ordinary internal API hyperlinks, and the framework selector. Resolved `href` attributes are written directly to anchors so opening links in new tabs works natively without click interception. Single-framework DocFX builds omit `_frameworkApi` and keep standard native behavior.
 - Per-TFM stage directories and logs are available under the output root for inspection.
 
 Use [framework-views.Dockerfile](framework-views.Dockerfile) with a context containing `site/` and `nginx.conf`. It uses a pinned NGINX base by default, accepts `NGINX_IMAGE` as an explicit build argument, checks for the manifest and runs `nginx -t`. A consumer can provide its own Dockerfile or server configuration and preserve the public path, routing, search worker and cache contract.

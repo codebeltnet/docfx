@@ -129,6 +129,24 @@ Describe 'Page availability inventory, NGINX fallback rules and shared navigatio
         $updated.sets.Count | Should -Be 3
     }
 
+    It 'preserves case-sensitive page availability entries across framework views' {
+        $site = (New-Item -ItemType Directory -Path "$TestDrive/avail-case-site").FullName
+        New-Item -ItemType Directory -Path "$site/api/ns", "$site/_frameworks/net10/api/ns" -Force | Out-Null
+        Set-Content -LiteralPath "$site/api/ns/Foo.html" 'net11'
+        Set-Content -LiteralPath "$site/_frameworks/net10/api/ns/foo.html" 'net10'
+
+        $views = [ordered]@{
+            'net-11.0' = [ordered]@{ directory = 'net11' }
+            'net-10.0' = [ordered]@{ directory = 'net10' }
+        }
+
+        $availability = Get-FrameworkPageAvailability $site 'api' 'net-11.0' $views
+        @($availability.pages.Keys) | Should -BeExactly @('ns/Foo.html', 'ns/foo.html')
+        $availability.sets[$availability.pages['ns/Foo.html']] | Should -BeExactly @('net-11.0')
+        $availability.sets[$availability.pages['ns/foo.html']] | Should -BeExactly @('net-10.0')
+        $availability.pages.Contains('ns/FOO.html') | Should -BeFalse
+    }
+
     It 'generates ordered NGINX fallback rules for default and non-default views' {
         $views = [ordered]@{
             'net-11.0'        = [ordered]@{ directory = 'net11' }

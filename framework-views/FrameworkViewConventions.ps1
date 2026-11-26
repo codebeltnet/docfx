@@ -104,7 +104,7 @@ function Get-FrameworkPageAvailability([string] $SiteRoot, [string] $ApiPath, [s
 
     $setIndexes = [Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
     $sets = [Collections.Generic.List[string[]]]::new()
-    $pages = [ordered]@{}
+    $pages = [Collections.Specialized.OrderedDictionary]::new([StringComparer]::Ordinal)
     $sortedKeys = [string[]]$pageViews.Keys
     [Array]::Sort($sortedKeys, [StringComparer]::Ordinal)
     foreach ($relative in $sortedKeys) {
